@@ -159,12 +159,12 @@
     /* ── Funnel ── */
     .cp-funnel { display: flex; flex-direction: column; }
     .f-stage { display: flex; align-items: center; gap: 9px; }
-    .f-lbl { width: 66px; flex-shrink: 0; font-size: .67rem; color: #8494A0; text-align: right; font-weight: 600; }
+    .f-lbl { width: 82px; flex-shrink: 0; font-size: .66rem; color: #8494A0; text-align: right; font-weight: 600; line-height: 1.2; }
     .f-track { flex: 1; height: 22px; background: #F5F8FA; border-radius: 4px; overflow: hidden; border: 1px solid #E1E8EE; }
     .f-fill { height: 100%; border-radius: 4px; transition: width .5s cubic-bezier(.4,0,.2,1); }
     .f-val { width: 46px; flex-shrink: 0; text-align: right; font-family: 'Space Grotesk', sans-serif; font-size: .74rem; font-weight: 700; font-variant-numeric: tabular-nums; }
     .f-pct { width: 36px; flex-shrink: 0; text-align: right; font-size: .62rem; color: #8494A0; font-variant-numeric: tabular-nums; }
-    .f-conn { height: 8px; margin-left: 74px; border-left: 1px dashed #E1E8EE; }
+    .f-conn { height: 8px; margin-left: 90px; border-left: 1px dashed #E1E8EE; }
     .f-explain { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF3F6; font-size: .68rem; line-height: 1.55; color: #8494A0; }
     .f-explain b { color: #5B6B78; }
 
@@ -551,7 +551,7 @@ async function loadData(){
     const LAUNCHED_STATUS=new Set(['running','paused','ended','completed','stopped','started']);
     camps=raw.map(c=>{
       const {icp,country}=parseCamp(c.name||''); const s=c.stats||{};
-      return {icp,country,name:c.name,status:String(c.status||'').toLowerCase(),createdAt:c.createdAt||null,
+      return {icp,country,name:c.name,status:String(c.status||'').toLowerCase(),createdAt:c.createdAt||null,lastSentAt:c.lastSentAt||null,
         leads:s.total||0,reached:s.contacted||0,opened:s.opened||0,
         clicked:s.clicked||0,replied:s.replied||0,unsub:s.unsubscribed||0,bounced:s.bounced||0};
     // keep only real ICP×country campaigns that are actually launched — drops tests, internal & drafts
@@ -757,11 +757,11 @@ function renderPerformers(){
 function renderFunnel(){
   const f=filtered(), g=agg(f), live=launched(f)&&g.reached>0;
   const stages=[
-    {lbl:'Prospects',val:g.leads,   col:'#1C86C2', desc:'Total leads loaded into the sequence — everyone who could be emailed. This is the 100% baseline.'},
-    {lbl:'Reached',  val:g.reached, col:'#6366F1', desc:'Emails actually sent by Lemlist.'},
-    {lbl:'Opened',   val:g.opened,  col:'#8B5CF6', desc:'Emails that were opened.'},
-    {lbl:'Clicked',  val:g.clicked, col:'#A78BFA', desc:'Recipients who clicked a link in an email.'},
-    {lbl:'Replied',  val:g.replied, col:'#1F9D6B', desc:'Recipients who replied — the goal of the sequence.'},
+    {lbl:'Leads loaded',val:g.leads,   col:'#1C86C2', desc:'How many contacts you put into the sequence. Everyone who could be emailed — the 100% baseline.'},
+    {lbl:'Emails sent', val:g.reached, col:'#6366F1', desc:'How many emails Lemlist has actually sent so far.'},
+    {lbl:'Opened',      val:g.opened,  col:'#8B5CF6', desc:'How many of those emails were opened.'},
+    {lbl:'Clicked',     val:g.clicked, col:'#A78BFA', desc:'How many had a link clicked.'},
+    {lbl:'Replied',     val:g.replied, col:'#1F9D6B', desc:'How many got a reply — the goal of the sequence.'},
   ];
   const mx=stages[0].val||1;
   document.getElementById('funnelSub').textContent=(sel===ALL?'all campaigns':sel)+(live?'':' · not launched');
@@ -776,7 +776,7 @@ function renderFunnel(){
       <div class="f-pct">${pctTxt}</div>
     </div>`;
   });
-  html+=`<div class="f-explain">Drop-off from <b>loaded → emailed → opened → clicked → replied</b>. Each % is that stage as a share of Prospects. A steep drop between two stages shows where to fix the sequence (e.g. Reached→Opened = subject line; Opened→Replied = body/CTA). Figures are Lemlist event counts.</div>`;
+  html+=`<div class="f-explain">Read top→bottom to see where people drop off. <b>Leads loaded</b> = contacts put into the sequence. <b>Emails sent</b> = emails Lemlist has sent to them so far. <b>Opened / Clicked / Replied</b> = how many of those were opened, clicked and replied to. The % beside each = that count ÷ leads loaded. A steep drop points to the fix: <b>Sent→Opened</b> = subject line; <b>Opened→Replied</b> = body/CTA.</div>`;
   document.getElementById('funnelEl').innerHTML=html;
 }
 
@@ -820,28 +820,34 @@ const fmtDate = d => d.toLocaleDateString('en-GB',{day:'numeric',month:'short',y
 function renderSequenceStatus(){
   const el=document.getElementById('seqTiming');
   const f=filtered();
-  if(!launched(f)){ el.innerHTML='<div class="st-empty">No launched sequences yet — TBD</div>'; document.getElementById('seqTimingSub').textContent='when each sequence launched, its run window, and when it’s ready to relaunch'; return; }
-  const dated=f.filter(c=>c.createdAt);
-  if(!dated.length){ el.innerHTML='<div class="st-empty">Launch dates not available yet — redeploy the Lemlist proxy to enable relaunch tracking.</div>'; return; }
+  const subEl=document.getElementById('seqTimingSub');
+  if(!launched(f)){ el.innerHTML='<div class="st-empty">No launched sequences yet — TBD</div>'; subEl.textContent='the date each sequence last sent an email, and when it becomes eligible to relaunch'; return; }
   const now=new Date();
-  const rows=dated.map(c=>{
-    const launch=new Date(c.createdAt);
-    const complete=new Date(launch.getTime()+SEQUENCE_DAYS*864e5);
-    const relaunch=new Date(complete.getTime()+RELAUNCH_AFTER_DAYS*864e5);
-    let badge,col,bg,note;
-    if(now<complete){ const d=Math.max(1,Math.ceil((complete-now)/864e5)); badge='Active'; col=GREEN; bg='rgba(31,157,107,.12)'; note='in sequence · ~'+d+' days left'; }
-    else if(now<relaunch){ const d=Math.ceil((relaunch-now)/864e5); badge='Cooling down'; col=AMBER; bg='rgba(224,164,0,.14)'; note='completed '+fmtDate(complete)+' · relaunch in '+d+' days'; }
-    else { badge='⏰ Ready to relaunch'; col=RED; bg='rgba(208,72,59,.12)'; note='completed '+fmtDate(complete)+' · '+RELAUNCH_AFTER_DAYS+'-day window has passed'; }
-    return {name:c.name, launch, complete, relaunch, badge, col, bg, note};
-  }).sort((a,b)=>a.relaunch-b.relaunch);
-  const ready=rows.filter(r=>r.badge.indexOf('Ready')>=0).length;
-  document.getElementById('seqTimingSub').innerHTML = ready>0
-    ? `<span style="color:${RED};font-weight:700">${ready} sequence${ready>1?'s':''} ready to relaunch</span> · window ${RELAUNCH_AFTER_DAYS} days after completion`
-    : `run window ~${SEQUENCE_DAYS} days · relaunch flagged ${RELAUNCH_AFTER_DAYS} days after completion`;
+  const DAY=864e5;
+  let ready=0, awaitingProxy=false;
+  const rows=f.map(c=>{
+    const icp=parseCamp(c.name).icp;
+    // No emails sent → sequence hasn't actually run yet.
+    if(!(c.reached>0)) return {name:c.name,icp,badge:'Not started',col:'#8494A0',bg:'#F0F3F5',dates:'No emails sent yet — sequence hasn’t run.',sort:9e15};
+    // Sent, but proxy hasn't been updated to return the last-send date.
+    if(!c.lastSentAt){ awaitingProxy=true; return {name:c.name,icp,badge:'—',col:'#8494A0',bg:'#F0F3F5',dates:'Emails sent, but last-send date needs the updated proxy (redeploy to enable).',sort:8e15}; }
+    const last=new Date(c.lastSentAt);
+    const daysSince=Math.floor((now-last)/DAY);
+    const relaunchIn=RELAUNCH_AFTER_DAYS-daysSince;
+    let badge,col,bg;
+    if(relaunchIn<=0){ ready++; badge='⏰ Ready to relaunch'; col=RED; bg='rgba(208,72,59,.12)'; }
+    else { badge=`Relaunch in ${relaunchIn}d`; col=AMBER; bg='rgba(224,164,0,.14)'; }
+    const dates=`Last email sent <b>${fmtDate(last)}</b> · ${daysSince===0?'today':daysSince+' day'+(daysSince===1?'':'s')+' ago'}`
+      + `<br><span style="color:#8494A0;font-size:.68rem;">${relaunchIn<=0?RELAUNCH_AFTER_DAYS+'-day cool-off has passed — safe to run again':'eligible to relaunch '+fmtDate(new Date(last.getTime()+RELAUNCH_AFTER_DAYS*DAY))}</span>`;
+    return {name:c.name,icp,badge,col,bg,dates,sort:relaunchIn};
+  }).sort((a,b)=>a.sort-b.sort);
+  subEl.innerHTML = ready>0
+    ? `<span style="color:${RED};font-weight:700">${ready} sequence${ready>1?'s':''} ready to relaunch</span> · flagged ${RELAUNCH_AFTER_DAYS} days after the last email was sent`
+    : `based on the real last-send date · relaunch flagged ${RELAUNCH_AFTER_DAYS} days after the last email was sent`;
   el.innerHTML=rows.map(r=>`
     <div class="st-row">
-      <div class="st-name" style="color:${ICOL[parseCamp(r.name).icp]||'#0C2233'}">${r.name}</div>
-      <div class="st-dates">Launched <b>${fmtDate(r.launch)}</b> → completes <b>${fmtDate(r.complete)}</b><br><span style="color:#8494A0;font-size:.68rem;">${r.note}</span></div>
+      <div class="st-name" style="color:${ICOL[r.icp]||'#0C2233'}">${r.name}</div>
+      <div class="st-dates">${r.dates}</div>
       <div class="st-badge" style="color:${r.col};background:${r.bg};">${r.badge}</div>
     </div>`).join('');
 }
