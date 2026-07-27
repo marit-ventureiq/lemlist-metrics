@@ -467,7 +467,7 @@ const ICOL      = { 'M&A':'#1C86C2', PE:'#10B981', CMA:'#8B5CF6', CVC:'#F59E0B',
 const METRICS   = {
   open:  { key:'open',  label:'Open rate',        fn:g=>pct(g.opened,g.reached)  },
   reply: { key:'reply', label:'Reply rate',        fn:g=>pct(g.replied,g.reached) },
-  unsub: { key:'unsub', label:'Unsubscribe rate',  fn:g=>pct(g.unsub,g.reached)   },
+  unsub: { key:'unsub', label:'Unsubscribe rate',  fn:g=>pct(g.unsub,g.leads)     },
 };
 
 /* ── Campaign name → ICP + country ──
@@ -501,7 +501,7 @@ const GREEN='#1F9D6B', AMBER='#E0A400', RED='#D0483B';
 const rateCol  = (v,t) => {
   if(t==='open')   return v>=50 ?GREEN:v>=30 ?AMBER:RED;   // >50% green · <30% red
   if(t==='reply')  return v>=3  ?GREEN:v>=1  ?AMBER:RED;
-  if(t==='unsub')  return v<0.5 ?GREEN:v<1.5 ?AMBER:RED;   // lower is better
+  if(t==='unsub')  return v<1   ?GREEN:v<3   ?AMBER:RED;   // lower is better (% of leads)
   if(t==='click')  return v>=3  ?GREEN:v>=1.5?AMBER:RED;
   if(t==='bounce') return v<1   ?GREEN:v<2   ?AMBER:RED;
   return '#5B6B78';
@@ -514,7 +514,7 @@ function heatColor(v,t){
   let lo,hi,inv=false;
   if(t==='open'){lo=30;hi=50;}
   else if(t==='reply'){lo=1;hi=3;}
-  else if(t==='unsub'){lo=0.3;hi=1.5;inv=true;}   // lower = greener
+  else if(t==='unsub'){lo=1;hi=3;inv=true;}   // lower = greener (% of leads)
   else {lo=0;hi=100;}
   let f=(v-lo)/(hi-lo); if(inv) f=1-f; f=Math.max(0,Math.min(1,f));
   const R=[208,72,59],A=[224,164,0],G=[31,157,107];
@@ -599,7 +599,7 @@ function renderHeader(){
 /* ── KPI strip ── */
 function renderKPIs(){
   const f=filtered(), g=agg(f), live=launched(f);
-  const or=pct(g.opened,g.reached), rr=pct(g.replied,g.reached), cr=pct(g.clicked,g.reached), ur=pct(g.unsub,g.reached);
+  const or=pct(g.opened,g.reached), rr=pct(g.replied,g.reached), cr=pct(g.clicked,g.reached), ur=pct(g.unsub,g.leads);
   // health hint per metric: green "healthy" · amber "watch" · red "⚠ adapt copy"
   const hint=(v,t,dflt)=>{ if(!g.reached) return dflt; const h=rateHealth(v,t);
     return h==='adapt'?`<span style="color:${RED};font-weight:700">⚠ adapt copy</span>`
@@ -610,7 +610,7 @@ function renderKPIs(){
     {lbl:'Avg open rate',      val:rateTBD(g.opened,g.reached),  sub:hint(or,'open','unique opens'),  col:g.reached?rateCol(or,'open'):null},
     {lbl:'Avg reply rate',     val:rateTBD(g.replied,g.reached), sub:hint(rr,'reply','all replies'),   col:g.reached?rateCol(rr,'reply'):null},
     {lbl:'Avg click rate',     val:rateTBD(g.clicked,g.reached), sub:g.reached?'link clicks':'link clicks'},
-    {lbl:'Avg unsubscribe',    val:rateTBD(g.unsub,g.reached),   sub:hint(ur,'unsub','unsubscribes'),  col:g.reached?rateCol(ur,'unsub'):null},
+    {lbl:'Avg unsubscribe',    val:rateTBD(g.unsub,g.leads),     sub:hint(ur,'unsub','of leads'),      col:g.leads?rateCol(ur,'unsub'):null},
   ];
   document.getElementById('kpiStrip').innerHTML=items.map(k=>`
     <div class="cp-kpi">
@@ -780,6 +780,7 @@ function renderTable(){
     if(sCol==='open')  {av=pct(a.opened,a.reached);bv=pct(b.opened,b.reached);}
     else if(sCol==='click') {av=pct(a.clicked,a.reached);bv=pct(b.clicked,b.reached);}
     else if(sCol==='reply') {av=pct(a.replied,a.reached);bv=pct(b.replied,b.reached);}
+    else if(sCol==='unsub') {av=pct(a.unsub,a.leads);bv=pct(b.unsub,b.leads);}
     else if(sCol==='bounce'){av=pct(a.bounced,a.leads);bv=pct(b.bounced,b.leads);}
     else {av=a[sCol]||0;bv=b[sCol]||0;}
     return sAsc?av-bv:bv-av;
@@ -788,8 +789,8 @@ function renderTable(){
   const th=(k,l)=>`<th class="${sCol===k?'son':''}" onclick="setSort('${k}')">${l}${sa(k)}</th>`;
   document.getElementById('tblTitle').textContent=isAll?'All ICPs — breakdown':`${sel} — by country`;
   document.getElementById('tblSub').textContent=`${rows.length} rows · click header to sort`;
-  document.getElementById('tblHead').innerHTML=`<tr>${th('label',isAll?'ICP':'Country')}${th('leads','Leads')}${th('reached','Reached')}${th('open','Open rate')}${th('click','Click rate')}${th('reply','Reply rate')}${th('unsub','Unsub')}${th('bounce','Bounced')}</tr>`;
-  const mx={or:Math.max(...rows.map(r=>pct(r.opened,r.reached)),1),cl:Math.max(...rows.map(r=>pct(r.clicked,r.reached)),1),rp:Math.max(...rows.map(r=>pct(r.replied,r.reached)),1),bo:Math.max(...rows.map(r=>pct(r.bounced,r.leads)),1)};
+  document.getElementById('tblHead').innerHTML=`<tr>${th('label',isAll?'ICP':'Country')}${th('leads','Leads')}${th('reached','Reached')}${th('open','Open rate')}${th('click','Click rate')}${th('reply','Reply rate')}${th('unsub','Unsub rate')}${th('bounce','Bounced')}</tr>`;
+  const mx={or:Math.max(...rows.map(r=>pct(r.opened,r.reached)),1),cl:Math.max(...rows.map(r=>pct(r.clicked,r.reached)),1),rp:Math.max(...rows.map(r=>pct(r.replied,r.reached)),1),us:Math.max(...rows.map(r=>pct(r.unsub,r.leads)),1),bo:Math.max(...rows.map(r=>pct(r.bounced,r.leads)),1)};
   const rCell=(n,d,t,m)=>{ const v=pct(n,d),col=rateCol(v,t),bw=Math.min(100,v/m*100); return `<td><div class="rc"><div class="mb"><div class="mbf" style="width:${d?bw:0}%;background:${col};"></div></div><span class="rn${d?'':' is-tbd'}" style="color:${d?col:'#B7C2CB'}">${d?v.toFixed(1)+'%':TBD}</span></div></td>`; };
   document.getElementById('tblBody').innerHTML=rows.map(r=>{
     const live=r._n>0;
@@ -798,7 +799,7 @@ function renderTable(){
       <td><div class="tdn"><div class="tdd" style="background:${r.col}"></div>${r.label}${isAll?`<span style="color:#8494A0;font-weight:400;font-size:.65rem;margin-left:3px;">(${r._n})</span>`:''}</div></td>
       <td class="tnum${live?'':' is-tbd'}">${live?fmt(r.leads):TBD}</td><td class="tnum${live?'':' is-tbd'}">${live?fmt(r.reached):TBD}</td>
       ${rCell(r.opened,r.reached,'open',mx.or)}${rCell(r.clicked,r.reached,'click',mx.cl)}${rCell(r.replied,r.reached,'reply',mx.rp)}
-      <td class="tmut${live?'':' is-tbd'}">${live?fmt(r.unsub):TBD}</td>${rCell(r.bounced,r.leads,'bounce',mx.bo)}
+      ${rCell(r.unsub,r.leads,'unsub',mx.us)}${rCell(r.bounced,r.leads,'bounce',mx.bo)}
     </tr>`;}).join('');
 }
 
