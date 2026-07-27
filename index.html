@@ -165,6 +165,8 @@
     .f-val { width: 46px; flex-shrink: 0; text-align: right; font-family: 'Space Grotesk', sans-serif; font-size: .74rem; font-weight: 700; font-variant-numeric: tabular-nums; }
     .f-pct { width: 36px; flex-shrink: 0; text-align: right; font-size: .62rem; color: #8494A0; font-variant-numeric: tabular-nums; }
     .f-conn { height: 8px; margin-left: 74px; border-left: 1px dashed #E1E8EE; }
+    .f-explain { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF3F6; font-size: .68rem; line-height: 1.55; color: #8494A0; }
+    .f-explain b { color: #5B6B78; }
 
     /* ── Table ── */
     .cp-table-wrap { overflow-x: auto; }
@@ -470,7 +472,7 @@ const APPS_SCRIPT_URL = 'https://script.google.com/a/macros/ventureiq.nl/s/AKfyc
 /* ── Constants ── */
 const ICPS      = ['M&A','PE','CMA','CVC','VC','Search Fund'];
 const ICPDESC   = { 'M&A':'Advisory / corp finance', PE:'Private equity', CMA:'Corporate M&A', CVC:'Corporate VC', VC:'Venture capital', 'Search Fund':'Searchers' };
-const COUNTRIES = ['Spain','Italy','France','Germany','Portugal','Greece','UK','Ireland','CEE','Balkans','Baltics','Nordics'];
+const COUNTRIES = ['Spain','Italy','France','Portugal','Greece','UK','Ireland','CEE','Balkans','Baltics','Nordics'];
 const ALL       = 'All ICPs';
 const ICOL      = { 'M&A':'#1C86C2', PE:'#10B981', CMA:'#8B5CF6', CVC:'#F59E0B', VC:'#EF4444', 'Search Fund':'#0D9488' };
 const METRICS   = {
@@ -755,24 +757,26 @@ function renderPerformers(){
 function renderFunnel(){
   const f=filtered(), g=agg(f), live=launched(f)&&g.reached>0;
   const stages=[
-    {lbl:'Prospects',val:g.leads,   col:'#1C86C2'},
-    {lbl:'Reached',  val:g.reached, col:'#6366F1'},
-    {lbl:'Opened',   val:g.opened,  col:'#8B5CF6'},
-    {lbl:'Clicked',  val:g.clicked, col:'#A78BFA'},
-    {lbl:'Replied',  val:g.replied, col:'#1F9D6B'},
+    {lbl:'Prospects',val:g.leads,   col:'#1C86C2', desc:'Total leads loaded into the sequence — everyone who could be emailed. This is the 100% baseline.'},
+    {lbl:'Reached',  val:g.reached, col:'#6366F1', desc:'Emails actually sent by Lemlist.'},
+    {lbl:'Opened',   val:g.opened,  col:'#8B5CF6', desc:'Emails that were opened.'},
+    {lbl:'Clicked',  val:g.clicked, col:'#A78BFA', desc:'Recipients who clicked a link in an email.'},
+    {lbl:'Replied',  val:g.replied, col:'#1F9D6B', desc:'Recipients who replied — the goal of the sequence.'},
   ];
   const mx=stages[0].val||1;
   document.getElementById('funnelSub').textContent=(sel===ALL?'all campaigns':sel)+(live?'':' · not launched');
   let html='';
   stages.forEach((s,i)=>{
     if(i>0) html+=`<div class="f-conn"></div>`;
-    html+=`<div class="f-stage">
+    const pctTxt = live?(i===0?'100%':fp(s.val,g.leads)):'';
+    html+=`<div class="f-stage" title="${s.lbl}: ${s.desc}${live&&i>0?'  ('+fp(s.val,g.leads)+' of all prospects reached this stage)':''}">
       <div class="f-lbl">${s.lbl}</div>
       <div class="f-track"><div class="f-fill" style="width:${live?(s.val/mx*100).toFixed(1):0}%;background:${s.col};opacity:.8;"></div></div>
       <div class="f-val" style="color:${live?s.col:'#B7C2CB'}">${live?fmtK(s.val):TBD}</div>
-      <div class="f-pct">${live?(i===0?'100%':fp(s.val,g.leads)):''}</div>
+      <div class="f-pct">${pctTxt}</div>
     </div>`;
   });
+  html+=`<div class="f-explain">Drop-off from <b>loaded → emailed → opened → clicked → replied</b>. Each % is that stage as a share of Prospects. A steep drop between two stages shows where to fix the sequence (e.g. Reached→Opened = subject line; Opened→Replied = body/CTA). Figures are Lemlist event counts.</div>`;
   document.getElementById('funnelEl').innerHTML=html;
 }
 
