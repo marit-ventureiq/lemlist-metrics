@@ -280,17 +280,6 @@
     <div class="cp-matrix-scroll" id="matrixWrap"></div>
   </div>
 
-  <!-- ICP bar chart card (All ICPs view only) -->
-  <div class="cp-card" id="icpBarCard">
-    <div class="cp-section" style="padding-bottom:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div class="cp-section-title" id="barTitle"></div>
-        <div style="font-size:.67rem;color:#8494A0;">click an ICP above to drill in</div>
-      </div>
-    </div>
-    <div class="cp-card-pad" style="padding-top:4px;" id="icpBars"></div>
-  </div>
-
   <!-- 3-col -->
   <div class="cp-3col">
     <div class="cp-card">
@@ -854,7 +843,7 @@ function renderSequenceStatus(){
 
 function render(){
   renderMetricNav(); renderICPTabs(); renderHeader(); renderKPIs();
-  renderMatrix(); renderICPBars(); renderPerformers(); renderFunnel(); renderSequenceStatus(); renderTable();
+  renderMatrix(); renderPerformers(); renderFunnel(); renderSequenceStatus(); renderTable();
 }
 
 loadData();
