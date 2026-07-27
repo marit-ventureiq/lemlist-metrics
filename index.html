@@ -124,8 +124,16 @@
     .mx-avg-val { text-align: center; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .72rem; padding: 0 4px !important; }
     .mx-avg-row td { padding: 4px 6px; font-size: .67rem; font-variant-numeric: tabular-nums; color: #5B6B78; text-align: center; border-top: 1px solid #EEF3F6; font-weight: 600; }
     .mx-avg-row td.mx-row-label { text-align: left; font-size: .6rem; letter-spacing: .07em; text-transform: uppercase; color: #8494A0; }
+    .mx-cell-leads { font-size: .55rem; font-weight: 600; color: #5B6B78; opacity: .7; margin-top: 1px; font-family: 'Manrope', sans-serif; }
+    /* ── Sequence timing / relaunch ── */
+    .st-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid #EEF3F6; flex-wrap: wrap; }
+    .st-row:last-child { border-bottom: none; }
+    .st-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .82rem; min-width: 120px; }
+    .st-dates { font-size: .74rem; color: #3A4A56; flex: 1; min-width: 220px; line-height: 1.5; }
+    .st-badge { font-size: .66rem; font-weight: 700; padding: 5px 12px; border-radius: 20px; white-space: nowrap; }
+    .st-empty { text-align: center; color: #B7C2CB; padding: 22px; font-size: .8rem; }
     .mx-legend { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: #8494A0; margin-left: auto; }
-    .mx-legend-grad { width: 80px; height: 7px; border-radius: 4px; background: linear-gradient(to right, rgba(208,72,59,.45), rgba(208,72,59,.08), rgba(28,134,194,.08), rgba(28,134,194,.55)); }
+    .mx-legend-grad { width: 90px; height: 7px; border-radius: 4px; background: linear-gradient(to right, rgba(208,72,59,.75), rgba(224,164,0,.7), rgba(31,157,107,.75)); }
 
     /* ── ICP bars ── */
     .cp-bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
@@ -270,8 +278,8 @@
     <div class="cp-matrix-scroll" id="matrixWrap"></div>
   </div>
 
-  <!-- ICP bar chart card -->
-  <div class="cp-card">
+  <!-- ICP bar chart card (All ICPs view only) -->
+  <div class="cp-card" id="icpBarCard">
     <div class="cp-section" style="padding-bottom:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <div class="cp-section-title" id="barTitle"></div>
@@ -312,6 +320,15 @@
         <div class="cp-funnel" id="funnelEl"></div>
       </div>
     </div>
+  </div>
+
+  <!-- Sequence timing & relaunch -->
+  <div class="cp-card" id="seqTimingCard">
+    <div class="cp-section" style="padding-bottom:12px;">
+      <div class="cp-section-title">Sequence timing &amp; relaunch</div>
+      <div class="cp-section-sub" id="seqTimingSub" style="margin-bottom:0;">when each sequence launched, its run window, and when it's ready to relaunch</div>
+    </div>
+    <div class="cp-card-pad" style="padding-top:4px;" id="seqTiming"></div>
   </div>
 
   <!-- Detail table -->
@@ -488,14 +505,34 @@ const TBD = 'TBD';
 const launched = arr => arr.length > 0;
 const rateTBD  = (n,d) => d>0 ? (n/d*100).toFixed(1)+'%' : TBD;   // rate or TBD
 const numTBD   = (ok,v) => ok ? fmtK(v) : TBD;                    // count or TBD
+/* ── 3-colour health system (green = doing well, amber = watch, red = adapt copy) ── */
+const GREEN='#1F9D6B', AMBER='#E0A400', RED='#D0483B';
 const rateCol  = (v,t) => {
-  if(t==='open')   return v>=30?'#1F9D6B':v>=20?'#E0A400':'#D0483B';
-  if(t==='reply')  return v>=2 ?'#1F9D6B':v>=1 ?'#E0A400':'#D0483B';
-  if(t==='unsub')  return v<0.5?'#1F9D6B':v<1  ?'#E0A400':'#D0483B';
-  if(t==='click')  return v>=3 ?'#1F9D6B':v>=1.5?'#E0A400':'#D0483B';
-  if(t==='bounce') return v<1  ?'#1F9D6B':v<2  ?'#E0A400':'#D0483B';
+  if(t==='open')   return v>=50 ?GREEN:v>=30 ?AMBER:RED;   // >50% green · <30% red
+  if(t==='reply')  return v>=3  ?GREEN:v>=1  ?AMBER:RED;
+  if(t==='unsub')  return v<0.5 ?GREEN:v<1.5 ?AMBER:RED;   // lower is better
+  if(t==='click')  return v>=3  ?GREEN:v>=1.5?AMBER:RED;
+  if(t==='bounce') return v<1   ?GREEN:v<2   ?AMBER:RED;
   return '#5B6B78';
 };
+/* health verdict for a metric value: 'good' | 'watch' | 'adapt' */
+const rateHealth = (v,t) => { const c=rateCol(v,t); return c===GREEN?'good':c===AMBER?'watch':'adapt'; };
+/* ── Heat-map colour: smooth red → amber → green transition on absolute thresholds ── */
+function mixRGB(a,b,t){ return [0,1,2].map(i=>Math.round(a[i]+(b[i]-a[i])*t)); }
+function heatColor(v,t){
+  let lo,hi,inv=false;
+  if(t==='open'){lo=30;hi=50;}
+  else if(t==='reply'){lo=1;hi=3;}
+  else if(t==='unsub'){lo=0.3;hi=1.5;inv=true;}   // lower = greener
+  else {lo=0;hi=100;}
+  let f=(v-lo)/(hi-lo); if(inv) f=1-f; f=Math.max(0,Math.min(1,f));
+  const R=[208,72,59],A=[224,164,0],G=[31,157,107];
+  const c = f<0.5 ? mixRGB(R,A,f*2) : mixRGB(A,G,(f-0.5)*2);
+  return `rgba(${c[0]},${c[1]},${c[2]},0.34)`;
+}
+/* ── Sequence timing / relaunch settings (adjustable) ── */
+const SEQUENCE_DAYS = 15;        // span of the 4-step sequence (Day 1 → ~15)
+const RELAUNCH_AFTER_DAYS = 90;  // re-engagement window after a sequence completes
 
 /* ── Load ── */
 function setBanner(html){ const b=document.getElementById('previewBar'); b.style.display=''; b.innerHTML='<div class="pb-dot"></div>'+html; }
@@ -512,7 +549,7 @@ async function loadData(){
     const LAUNCHED_STATUS=new Set(['running','paused','ended','completed','stopped','started']);
     camps=raw.map(c=>{
       const {icp,country}=parseCamp(c.name||''); const s=c.stats||{};
-      return {icp,country,name:c.name,status:String(c.status||'').toLowerCase(),
+      return {icp,country,name:c.name,status:String(c.status||'').toLowerCase(),createdAt:c.createdAt||null,
         leads:s.total||0,reached:s.contacted||0,opened:s.opened||0,
         clicked:s.clicked||0,replied:s.replied||0,unsub:s.unsubscribed||0,bounced:s.bounced||0};
     // keep only real ICP×country campaigns that are actually launched — drops tests, internal & drafts
@@ -572,12 +609,17 @@ function renderHeader(){
 function renderKPIs(){
   const f=filtered(), g=agg(f), live=launched(f);
   const or=pct(g.opened,g.reached), rr=pct(g.replied,g.reached), cr=pct(g.clicked,g.reached), ur=pct(g.unsub,g.reached);
+  // health hint per metric: green "healthy" · amber "watch" · red "⚠ adapt copy"
+  const hint=(v,t,dflt)=>{ if(!g.reached) return dflt; const h=rateHealth(v,t);
+    return h==='adapt'?`<span style="color:${RED};font-weight:700">⚠ adapt copy</span>`
+         : h==='watch'?`<span style="color:${AMBER};font-weight:700">watch</span>`
+         : `<span style="color:${GREEN};font-weight:700">healthy</span>`; };
   const items=[
     {lbl:'Leads in campaigns', val:live?fmtK(g.leads):TBD, sub:live?fmtK(g.reached)+' emails sent':'not launched'},
-    {lbl:'Avg open rate',      val:rateTBD(g.opened,g.reached),  sub:'unique opens',  col:g.reached?rateCol(or,'open'):null},
-    {lbl:'Avg reply rate',     val:rateTBD(g.replied,g.reached), sub:'all replies',   col:g.reached?rateCol(rr,'reply'):null},
-    {lbl:'Avg click rate',     val:rateTBD(g.clicked,g.reached), sub:'link clicks'},
-    {lbl:'Avg unsubscribe',    val:rateTBD(g.unsub,g.reached),   sub:'unsubscribes'},
+    {lbl:'Avg open rate',      val:rateTBD(g.opened,g.reached),  sub:hint(or,'open','unique opens'),  col:g.reached?rateCol(or,'open'):null},
+    {lbl:'Avg reply rate',     val:rateTBD(g.replied,g.reached), sub:hint(rr,'reply','all replies'),   col:g.reached?rateCol(rr,'reply'):null},
+    {lbl:'Avg click rate',     val:rateTBD(g.clicked,g.reached), sub:g.reached?'link clicks':'link clicks'},
+    {lbl:'Avg unsubscribe',    val:rateTBD(g.unsub,g.reached),   sub:hint(ur,'unsub','unsubscribes'),  col:g.reached?rateCol(ur,'unsub'):null},
   ];
   document.getElementById('kpiStrip').innerHTML=items.map(k=>`
     <div class="cp-kpi">
@@ -607,7 +649,7 @@ function renderMatrix(){
   const cellTxt   = x => (x.live&&x.reached) ? x.val.toFixed(1)+'%' : TBD;
 
   document.getElementById('heroTitle').textContent=`${mDef.label} by ICP × Country`;
-  document.getElementById('heroSub').textContent='Darker = stronger performance · hover a cell for detail';
+  document.getElementById('heroSub').textContent='🟢 performing · 🟠 watch · 🔴 underperforming → adapt the copy · small figure = leads';
 
   const html=`<table class="mx">
     <thead>
@@ -633,7 +675,7 @@ function renderMatrix(){
           ${COUNTRIES.map(c=>{
             const x=grid[icp][c];
             if(!x.live||!x.reached) return `<td class="mx-cell mx-tbd" title="${icp} · ${c}: not launched">${TBD}</td>`;
-            return `<td class="mx-cell" style="background:${cellBg(x.val,minV,maxV)}" title="${icp} · ${c}: ${x.val.toFixed(1)}% · ${fmtK(x.leads)} leads">${x.val.toFixed(1)}%</td>`;
+            return `<td class="mx-cell" style="background:${heatColor(x.val,metric)}" title="${icp} · ${c}: ${x.val.toFixed(1)}% · ${fmtK(x.leads)} leads"><div>${x.val.toFixed(1)}%</div><div class="mx-cell-leads">${fmtK(x.leads)} leads</div></td>`;
           }).join('')}
           <td class="mx-avg-val" style="color:${(rowAgg[icp].live&&rowAgg[icp].reached)?ICOL[icp]:'#B7C2CB'}">${cellTxt(rowAgg[icp])}</td>
         </tr>`;
@@ -653,6 +695,9 @@ function renderMatrix(){
 
 /* ── ICP bars ── */
 function renderICPBars(){
+  // Overall-ICP comparison only makes sense in the "All ICPs" view.
+  document.getElementById('icpBarCard').style.display = sel===ALL ? '' : 'none';
+  if(sel!==ALL) return;
   const mDef=METRICS[metric];
   document.getElementById('barTitle').textContent=`${mDef.label} by ICP`;
   const rows=ICPS.map(icp=>{ const cc=camps.filter(c=>c.icp===icp); const g=agg(cc); return {icp,col:ICOL[icp],val:mDef.fn(g),leads:g.leads,live:cc.length>0,reached:g.reached}; })
@@ -766,9 +811,40 @@ function renderTable(){
 
 function setSort(k){ sAsc=sCol===k?!sAsc:false; sCol=k; renderTable(); }
 
+/* ── Sequence timing & relaunch ── */
+const fmtDate = d => d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
+function renderSequenceStatus(){
+  const el=document.getElementById('seqTiming');
+  const f=filtered();
+  if(!launched(f)){ el.innerHTML='<div class="st-empty">No launched sequences yet — TBD</div>'; document.getElementById('seqTimingSub').textContent='when each sequence launched, its run window, and when it’s ready to relaunch'; return; }
+  const dated=f.filter(c=>c.createdAt);
+  if(!dated.length){ el.innerHTML='<div class="st-empty">Launch dates not available yet — redeploy the Lemlist proxy to enable relaunch tracking.</div>'; return; }
+  const now=new Date();
+  const rows=dated.map(c=>{
+    const launch=new Date(c.createdAt);
+    const complete=new Date(launch.getTime()+SEQUENCE_DAYS*864e5);
+    const relaunch=new Date(complete.getTime()+RELAUNCH_AFTER_DAYS*864e5);
+    let badge,col,bg,note;
+    if(now<complete){ const d=Math.max(1,Math.ceil((complete-now)/864e5)); badge='Active'; col=GREEN; bg='rgba(31,157,107,.12)'; note='in sequence · ~'+d+' days left'; }
+    else if(now<relaunch){ const d=Math.ceil((relaunch-now)/864e5); badge='Cooling down'; col=AMBER; bg='rgba(224,164,0,.14)'; note='completed '+fmtDate(complete)+' · relaunch in '+d+' days'; }
+    else { badge='⏰ Ready to relaunch'; col=RED; bg='rgba(208,72,59,.12)'; note='completed '+fmtDate(complete)+' · '+RELAUNCH_AFTER_DAYS+'-day window has passed'; }
+    return {name:c.name, launch, complete, relaunch, badge, col, bg, note};
+  }).sort((a,b)=>a.relaunch-b.relaunch);
+  const ready=rows.filter(r=>r.badge.indexOf('Ready')>=0).length;
+  document.getElementById('seqTimingSub').innerHTML = ready>0
+    ? `<span style="color:${RED};font-weight:700">${ready} sequence${ready>1?'s':''} ready to relaunch</span> · window ${RELAUNCH_AFTER_DAYS} days after completion`
+    : `run window ~${SEQUENCE_DAYS} days · relaunch flagged ${RELAUNCH_AFTER_DAYS} days after completion`;
+  el.innerHTML=rows.map(r=>`
+    <div class="st-row">
+      <div class="st-name" style="color:${ICOL[parseCamp(r.name).icp]||'#0C2233'}">${r.name}</div>
+      <div class="st-dates">Launched <b>${fmtDate(r.launch)}</b> → completes <b>${fmtDate(r.complete)}</b><br><span style="color:#8494A0;font-size:.68rem;">${r.note}</span></div>
+      <div class="st-badge" style="color:${r.col};background:${r.bg};">${r.badge}</div>
+    </div>`).join('');
+}
+
 function render(){
   renderMetricNav(); renderICPTabs(); renderHeader(); renderKPIs();
-  renderMatrix(); renderICPBars(); renderPerformers(); renderFunnel(); renderTable();
+  renderMatrix(); renderICPBars(); renderPerformers(); renderFunnel(); renderSequenceStatus(); renderTable();
 }
 
 loadData();
