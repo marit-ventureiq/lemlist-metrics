@@ -142,7 +142,7 @@
     .tr-vol-label { min-width: 92px; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .76rem; flex-shrink: 0; }
     .tr-vol-track { flex: 1; height: 24px; background: #F5F8FA; border-radius: 6px; overflow: hidden; position: relative; }
     .tr-vol-fill { height: 100%; position: absolute; left: 0; top: 0; border-radius: 6px; transition: width .4s; }
-    .tr-vol-num { min-width: 150px; text-align: right; font-size: .7rem; color: #5B6B78; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .tr-vol-num { min-width: 230px; text-align: right; font-size: .7rem; color: #5B6B78; font-variant-numeric: tabular-nums; flex-shrink: 0; }
     .tr-empty { text-align: center; color: #B7C2CB; padding: 24px; font-size: .8rem; }
     .tr-chart svg { width: 100%; height: auto; display: block; }
     .tr-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; padding-left: 4px; }
@@ -379,7 +379,7 @@
   <div class="cp-card">
     <div class="cp-section" style="padding-bottom:10px;">
       <div class="cp-section-title">Open rate per ICP, by sequence</div>
-      <div class="cp-section-sub" style="margin-bottom:0;">each point is a launched campaign, plotted by its last-send date — see which ICP opens best</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">each dot = one campaign's overall open rate at its last-send date (not a daily figure) · dot size = send volume · tiny sequences excluded</div>
     </div>
     <div class="cp-card-pad" style="padding-top:4px;" id="trOpen"></div>
   </div>
@@ -387,7 +387,7 @@
   <div class="cp-card">
     <div class="cp-section" style="padding-bottom:10px;">
       <div class="cp-section-title">Reply rate per ICP, by sequence</div>
-      <div class="cp-section-sub" style="margin-bottom:0;">same campaigns — see which ICP converts to replies best</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">each dot = one campaign's overall reply rate at its last-send date · dot size = send volume · tiny sequences excluded</div>
     </div>
     <div class="cp-card-pad" style="padding-top:4px;" id="trReply"></div>
   </div>
@@ -961,23 +961,33 @@ function renderVolume(){
   const el=document.getElementById('trVolume'), now=new Date();
   const by={};
   camps.forEach(c=>{
-    const g=by[c.icp]||(by[c.icp]={total:0,ready:0});
-    g.total+=c.leads||0;
-    if(c.lastSentAt && Math.floor((now-new Date(c.lastSentAt))/864e5)>=RELAUNCH_AFTER_DAYS) g.ready+=c.leads||0;
+    const g=by[c.icp]||(by[c.icp]={total:0,ready:0,seq:0,soonest:Infinity});
+    g.total+=c.leads||0; g.seq++;
+    if(c.lastSentAt){ const rin=RELAUNCH_AFTER_DAYS-Math.floor((now-new Date(c.lastSentAt))/864e5);
+      if(rin<=0) g.ready+=c.leads||0; else g.soonest=Math.min(g.soonest,rin); }
   });
-  const rows=ICPS.map(icp=>({icp,col:ICOL[icp],total:(by[icp]||{}).total||0,ready:(by[icp]||{}).ready||0}))
+  const rows=ICPS.map(icp=>Object.assign({icp,col:ICOL[icp],total:0,ready:0,seq:0,soonest:Infinity}, by[icp]||{}))
     .filter(r=>r.total>0).sort((a,b)=>b.total-a.total);
   if(!rows.length){ el.innerHTML='<div class="tr-empty">No launched campaigns yet — TBD</div>'; return; }
   const max=Math.max(...rows.map(r=>r.total),1);
-  el.innerHTML=rows.map(r=>`
-    <div class="tr-vol-row">
+  const legend=`<div class="tr-legend" style="margin:0 0 10px 92px;">
+    <div class="tr-leg-item"><span style="display:inline-block;width:16px;height:9px;border-radius:3px;background:#98a1b0;opacity:.32;"></span>total leads in live sequences <span style="color:#98a1b0">(bar length compares ICPs)</span></div>
+    <div class="tr-leg-item"><span style="display:inline-block;width:16px;height:9px;border-radius:3px;background:#5B6B78;"></span>ready to relaunch now <span style="color:#98a1b0">(past the ${RELAUNCH_AFTER_DAYS}-day cool-off)</span></div>
+  </div>`;
+  const bars=rows.map(r=>{
+    const readyTxt = r.ready>0
+      ? `<b style="color:${r.col}">${fmtK(r.ready)} ready now</b>`
+      : (r.soonest!==Infinity ? `none ready · first in ${r.soonest}d` : 'none sent yet');
+    return `<div class="tr-vol-row">
       <div class="tr-vol-label" style="color:${r.col}">${r.icp}</div>
-      <div class="tr-vol-track">
-        <div class="tr-vol-fill" style="width:${(r.total/max*100).toFixed(1)}%;background:${r.col};opacity:.3;"></div>
+      <div class="tr-vol-track" title="${r.icp}: ${fmt(r.total)} leads across ${r.seq} sequence${r.seq>1?'s':''}${r.ready>0?', '+fmt(r.ready)+' ready to relaunch':''}">
+        <div class="tr-vol-fill" style="width:${(r.total/max*100).toFixed(1)}%;background:${r.col};opacity:.28;"></div>
         <div class="tr-vol-fill" style="width:${(r.ready/max*100).toFixed(1)}%;background:${r.col};"></div>
       </div>
-      <div class="tr-vol-num">${fmtK(r.total)} leads${r.ready>0?` · <b style="color:${r.col}">${fmtK(r.ready)} ready</b>`:' · 0 ready'}</div>
-    </div>`).join('');
+      <div class="tr-vol-num">${fmtK(r.total)} leads · ${r.seq} seq · ${readyTxt}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML=legend+bars;
 }
 
 function niceTicks(max){ const step=max<=10?2:max<=30?5:max<=60?10:20; const t=[]; for(let v=0;v<=max;v+=step) t.push(v); return t; }
@@ -985,11 +995,14 @@ function niceTicks(max){ const step=max<=10?2:max<=30?5:max<=60?10:20; const t=[
 /* Line chart: open or reply rate per ICP, points = campaigns by last-send date */
 function renderRateChart(id, metric){
   const el=document.getElementById(id);
-  const pts=camps.filter(c=>c.reached>0).map(c=>({
-    icp:c.icp, date:new Date(c.lastSentAt||c.createdAt||Date.now()),
+  // Each point = one campaign's OVERALL rate (opened/sent), placed at its last-send date.
+  // Only campaigns with enough volume (≥10 sent) are plotted, so thin/just-started
+  // sequences can't drag the line to 0. Dot size = send volume.
+  const pts=camps.filter(c=>c.reached>=10).map(c=>({
+    icp:c.icp, date:new Date(c.lastSentAt||c.createdAt||Date.now()), reached:c.reached,
     y: metric==='open'?pct(c.opened,c.reached):pct(c.replied,c.reached), name:c.name
   })).filter(p=>!isNaN(+p.date));
-  if(!pts.length){ el.innerHTML='<div class="tr-empty">No sent campaigns yet — TBD</div>'; return; }
+  if(!pts.length){ el.innerHTML='<div class="tr-empty">Not enough send volume yet — TBD</div>'; return; }
   const groups={}; pts.forEach(p=>{ (groups[p.icp]=groups[p.icp]||[]).push(p); });
   Object.values(groups).forEach(g=>g.sort((a,b)=>a.date-b.date));
   const W=640,H=210,padL=40,padR=14,padT=14,padB=32;
@@ -1004,7 +1017,7 @@ function renderRateChart(id, metric){
   Object.keys(groups).forEach(icp=>{
     const g=groups[icp], col=ICOL[icp]||'#8494A0';
     if(g.length>1) lines+=`<polyline points="${g.map(p=>`${X(p.date).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`;
-    g.forEach(p=>{ lines+=`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.5" fill="${col}"><title>${p.name} · ${p.y.toFixed(1)}%</title></circle>`; });
+    g.forEach(p=>{ const r=Math.max(3,Math.min(8,3+p.reached/300)); lines+=`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}"><title>${p.name} · ${p.y.toFixed(1)}% · ${fmtK(p.reached)} sent</title></circle>`; });
   });
   const leg=Object.keys(groups).map(icp=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${ICOL[icp]||'#8494A0'}"></span>${icp} (${groups[icp].length})</div>`).join('');
   el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div>`;
