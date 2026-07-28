@@ -991,7 +991,10 @@ function renderVolume(){
   el.innerHTML=legend+bars;
 }
 
-function niceTicks(max){ const step=max<=10?2:max<=30?5:max<=60?10:20; const t=[]; for(let v=0;v<=max;v+=step) t.push(v); return t; }
+function niceTicks(max){
+  const step = max<=1?0.25 : max<=2.5?0.5 : max<=5?1 : max<=10?2 : max<=30?5 : max<=60?10 : 20;
+  const t=[]; for(let v=0; v<=max+1e-9; v+=step) t.push(+v.toFixed(2)); return t;
+}
 
 /* Line chart: open or reply rate per ICP, points = campaigns by last-send date */
 /* Weekly rate chart — rebuilt from the activity feed (opens/replies bucketed by their SEND week).
