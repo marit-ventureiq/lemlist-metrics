@@ -378,16 +378,16 @@
 
   <div class="cp-card">
     <div class="cp-section" style="padding-bottom:10px;">
-      <div class="cp-section-title">Open rate per ICP, by sequence</div>
-      <div class="cp-section-sub" style="margin-bottom:0;">each dot = one campaign's overall open rate at its last-send date (not a daily figure) · dot size = send volume · tiny sequences excluded</div>
+      <div class="cp-section-title">Open rate per ICP, by week</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">opens ÷ emails sent that week (opens counted against their send-week) · a break in a line = no sends that week (N/A)</div>
     </div>
     <div class="cp-card-pad" style="padding-top:4px;" id="trOpen"></div>
   </div>
 
   <div class="cp-card">
     <div class="cp-section" style="padding-bottom:10px;">
-      <div class="cp-section-title">Reply rate per ICP, by sequence</div>
-      <div class="cp-section-sub" style="margin-bottom:0;">each dot = one campaign's overall reply rate at its last-send date · dot size = send volume · tiny sequences excluded</div>
+      <div class="cp-section-title">Reply rate per ICP, by week</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">replies ÷ emails sent that week (replies counted against their send-week) · a break in a line = no sends that week (N/A)</div>
     </div>
     <div class="cp-card-pad" style="padding-top:4px;" id="trReply"></div>
   </div>
@@ -428,6 +428,7 @@ function switchTab(id, btn) {
   document.getElementById('tab-' + id).classList.add('active');
   btn.classList.add('active');
   if(id==='sequence') loadSeqLab();
+  if(id==='trends' && !timelineLoaded && !timelineLoading && camps.length) loadTimeline();
 }
 
 
@@ -952,8 +953,8 @@ function renderTrends(){
     ? '<div class="cp-status-dot" style="background:#1F9D6B"></div>Live · Lemlist connected'
     : '<div class="cp-status-dot" style="background:#E0A400"></div>No launched campaigns';
   renderVolume();
-  renderRateChart('trOpen','open');
-  renderRateChart('trReply','reply');
+  renderWeekly('trOpen','open');
+  renderWeekly('trReply','reply');
 }
 
 /* Backlog volume per ICP — total leads in launched sequences + how many are relaunch-ready */
@@ -993,34 +994,64 @@ function renderVolume(){
 function niceTicks(max){ const step=max<=10?2:max<=30?5:max<=60?10:20; const t=[]; for(let v=0;v<=max;v+=step) t.push(v); return t; }
 
 /* Line chart: open or reply rate per ICP, points = campaigns by last-send date */
-function renderRateChart(id, metric){
+/* Weekly rate chart — rebuilt from the activity feed (opens/replies bucketed by their SEND week).
+   Weeks with no sends for an ICP are gaps (N/A), never plotted as 0%. Loaded lazily. */
+let timelineData=null, timelineLoaded=false, timelineLoading=false;
+
+async function loadTimeline(){
+  timelineLoading=true; renderTrends();
+  try{
+    const res=await fetch(APPS_SCRIPT_URL+'?mode=timeline');
+    const raw=await res.json();
+    if(!Array.isArray(raw)) throw new Error('bad response');
+    const per=raw.map(c=>{ const {icp,country}=parseCamp(c.name||''); return {icp,country,weeks:c.weeks||null}; })
+      .filter(c=>ICPS.includes(c.icp)&&COUNTRIES.includes(c.country));
+    if(!per.some(c=>c.weeks)){ timelineData='UNSUPPORTED'; }
+    else{
+      const by={};
+      per.forEach(c=>{ if(!c.weeks) return; const g=by[c.icp]||(by[c.icp]={});
+        Object.keys(c.weeks).forEach(wk=>{ const w=g[wk]||(g[wk]={sent:0,opened:0,replied:0}), s=c.weeks[wk];
+          w.sent+=s.sent||0; w.opened+=s.opened||0; w.replied+=s.replied||0; }); });
+      timelineData=by;
+    }
+  }catch(e){ timelineData='ERROR'; }
+  timelineLoading=false; timelineLoaded=true; renderTrends();
+}
+
+function continuousWeeks(a,b){ const out=[]; let d=new Date(a+'T00:00:00Z'), end=new Date(b+'T00:00:00Z');
+  while(d<=end && out.length<80){ out.push(d.toISOString().slice(0,10)); d.setUTCDate(d.getUTCDate()+7); } return out; }
+
+function renderWeekly(id, metric){
   const el=document.getElementById(id);
-  // Each point = one campaign's OVERALL rate (opened/sent), placed at its last-send date.
-  // Only campaigns with enough volume (≥10 sent) are plotted, so thin/just-started
-  // sequences can't drag the line to 0. Dot size = send volume.
-  const pts=camps.filter(c=>c.reached>=10).map(c=>({
-    icp:c.icp, date:new Date(c.lastSentAt||c.createdAt||Date.now()), reached:c.reached,
-    y: metric==='open'?pct(c.opened,c.reached):pct(c.replied,c.reached), name:c.name
-  })).filter(p=>!isNaN(+p.date));
-  if(!pts.length){ el.innerHTML='<div class="tr-empty">Not enough send volume yet — TBD</div>'; return; }
-  const groups={}; pts.forEach(p=>{ (groups[p.icp]=groups[p.icp]||[]).push(p); });
-  Object.values(groups).forEach(g=>g.sort((a,b)=>a.date-b.date));
-  const W=640,H=210,padL=40,padR=14,padT=14,padB=32;
-  const xs=pts.map(p=>+p.date); let xmin=Math.min(...xs), xmax=Math.max(...xs);
-  if(xmin===xmax){ xmin-=864e5; xmax+=864e5; }
-  const ymax=Math.max(Math.max(...pts.map(p=>p.y))*1.15, metric==='open'?10:2);
-  const X=d=>padL+(+d-xmin)/(xmax-xmin)*(W-padL-padR);
+  if(timelineLoading){ el.innerHTML='<div class="tr-empty">Loading weekly history from Lemlist… (a few seconds)</div>'; return; }
+  if(!timelineData){ el.innerHTML='<div class="tr-empty">Weekly history loads when you open this tab.</div>'; return; }
+  if(timelineData==='UNSUPPORTED'){ el.innerHTML='<div class="tr-empty">Weekly trends need the updated proxy — redeploy to enable.</div>'; return; }
+  if(timelineData==='ERROR'){ el.innerHTML='<div class="tr-empty">Couldn\'t load weekly history — try Refresh.</div>'; return; }
+  const by=timelineData, wset=new Set();
+  Object.values(by).forEach(wks=>Object.keys(wks).forEach(w=>wset.add(w)));
+  const sorted=[...wset].sort();
+  if(!sorted.length){ el.innerHTML='<div class="tr-empty">No sends recorded yet — TBD</div>'; return; }
+  const axis=continuousWeeks(sorted[0], sorted[sorted.length-1]);
+  const series=ICPS.filter(icp=>by[icp]).map(icp=>({ icp, col:ICOL[icp],
+    points: axis.map(w=>{ const s=by[icp][w]; if(!s||!s.sent) return {y:null};
+      const num=metric==='open'?s.opened:s.replied; return {y:Math.min(100,num/s.sent*100), sent:s.sent}; }) }))
+    .filter(s=>s.points.some(p=>p.y!==null));
+  if(!series.length){ el.innerHTML='<div class="tr-empty">No sends recorded yet — TBD</div>'; return; }
+  const W=640,H=210,padL=40,padR=14,padT=14,padB=34,n=axis.length;
+  const X=i=> n<=1?padL+(W-padL-padR)/2 : padL+i/(n-1)*(W-padL-padR);
+  const ymax=Math.max(...series.flatMap(s=>s.points.filter(p=>p.y!=null).map(p=>p.y)), metric==='open'?10:2)*1.12;
   const Y=v=>padT+(1-v/ymax)*(H-padT-padB);
   let grid=''; niceTicks(ymax).forEach(t=>{ const y=Y(t); grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#EEF3F6"/><text x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8494A0">${t}%</text>`; });
-  let xax=''; [xmin,(xmin+xmax)/2,xmax].forEach(t=>{ xax+=`<text x="${X(t).toFixed(1)}" y="${H-10}" text-anchor="middle" font-size="9" fill="#8494A0">${new Date(t).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</text>`; });
+  let xax=''; const ticks=n<=1?[0]:[0,Math.floor((n-1)/2),n-1]; ticks.forEach(i=>{ const d=new Date(axis[i]+'T00:00:00Z'); xax+=`<text x="${X(i).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="9" fill="#8494A0">wk ${d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</text>`; });
   let lines='';
-  Object.keys(groups).forEach(icp=>{
-    const g=groups[icp], col=ICOL[icp]||'#8494A0';
-    if(g.length>1) lines+=`<polyline points="${g.map(p=>`${X(p.date).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`;
-    g.forEach(p=>{ const r=Math.max(3,Math.min(8,3+p.reached/300)); lines+=`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="${r.toFixed(1)}" fill="${col}"><title>${p.name} · ${p.y.toFixed(1)}% · ${fmtK(p.reached)} sent</title></circle>`; });
+  series.forEach(s=>{ let seg=[];
+    const flush=()=>{ if(seg.length>1) lines+=`<polyline points="${seg.join(' ')}" fill="none" stroke="${s.col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`; seg=[]; };
+    s.points.forEach((p,i)=>{ if(p.y==null){ flush(); return; } const x=X(i).toFixed(1), y=Y(p.y).toFixed(1); seg.push(x+','+y);
+      lines+=`<circle cx="${x}" cy="${y}" r="3.4" fill="${s.col}"><title>${s.icp} · week of ${axis[i]} · ${p.y.toFixed(1)}% · ${p.sent} sent</title></circle>`; });
+    flush();
   });
-  const leg=Object.keys(groups).map(icp=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${ICOL[icp]||'#8494A0'}"></span>${icp} (${groups[icp].length})</div>`).join('');
-  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div>`;
+  const leg=series.map(s=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${s.col}"></span>${s.icp}</div>`).join('');
+  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">gaps = weeks with no sends for that ICP (N/A)</div>`;
 }
 
 function render(){
