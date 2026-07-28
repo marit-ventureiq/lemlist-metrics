@@ -359,7 +359,7 @@
       <div><div class="cp-brand">Performance over time</div></div>
       <div class="cp-header-right">
         <div class="cp-status" id="trStatus"><div class="cp-status-dot" style="background:#E0A400"></div>—</div>
-        <button class="cp-refresh" onclick="loadData()">
+        <button class="cp-refresh" onclick="loadData();loadTimeline(true)">
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M10.5 6A4.5 4.5 0 116 1.5a4.5 4.5 0 013.18 1.32M10.5 1.5v3h-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Refresh
         </button>
@@ -998,22 +998,28 @@ function niceTicks(max){ const step=max<=10?2:max<=30?5:max<=60?10:20; const t=[
    Weeks with no sends for an ICP are gaps (N/A), never plotted as 0%. Loaded lazily. */
 let timelineData=null, timelineLoaded=false, timelineLoading=false;
 
-async function loadTimeline(){
+const TL_CACHE_KEY='viq_timeline_v1';
+function buildByIcp(raw){
+  const per=raw.map(c=>{ const {icp,country}=parseCamp(c.name||''); return {icp,country,weeks:c.weeks||null}; })
+    .filter(c=>ICPS.includes(c.icp)&&COUNTRIES.includes(c.country));
+  if(!per.some(c=>c.weeks)) return 'UNSUPPORTED';
+  const by={};
+  per.forEach(c=>{ if(!c.weeks) return; const g=by[c.icp]||(by[c.icp]={});
+    Object.keys(c.weeks).forEach(wk=>{ const w=g[wk]||(g[wk]={sent:0,opened:0,replied:0}), s=c.weeks[wk];
+      w.sent+=s.sent||0; w.opened+=s.opened||0; w.replied+=s.replied||0; }); });
+  return by;
+}
+async function loadTimeline(force){
+  // Browser cache (3h) so it's a one-time wait per browser, not every visit.
+  if(!force){ try{ const c=JSON.parse(localStorage.getItem(TL_CACHE_KEY)||'null');
+    if(c && Date.now()-c.t < 3*3600e3){ timelineData=buildByIcp(c.raw); timelineLoaded=true; renderTrends(); return; } }catch(e){} }
   timelineLoading=true; renderTrends();
   try{
     const res=await fetch(APPS_SCRIPT_URL+'?mode=timeline');
     const raw=await res.json();
     if(!Array.isArray(raw)) throw new Error('bad response');
-    const per=raw.map(c=>{ const {icp,country}=parseCamp(c.name||''); return {icp,country,weeks:c.weeks||null}; })
-      .filter(c=>ICPS.includes(c.icp)&&COUNTRIES.includes(c.country));
-    if(!per.some(c=>c.weeks)){ timelineData='UNSUPPORTED'; }
-    else{
-      const by={};
-      per.forEach(c=>{ if(!c.weeks) return; const g=by[c.icp]||(by[c.icp]={});
-        Object.keys(c.weeks).forEach(wk=>{ const w=g[wk]||(g[wk]={sent:0,opened:0,replied:0}), s=c.weeks[wk];
-          w.sent+=s.sent||0; w.opened+=s.opened||0; w.replied+=s.replied||0; }); });
-      timelineData=by;
-    }
+    try{ localStorage.setItem(TL_CACHE_KEY, JSON.stringify({t:Date.now(), raw})); }catch(e){}
+    timelineData=buildByIcp(raw);
   }catch(e){ timelineData='ERROR'; }
   timelineLoading=false; timelineLoaded=true; renderTrends();
 }
@@ -1023,7 +1029,7 @@ function continuousWeeks(a,b){ const out=[]; let d=new Date(a+'T00:00:00Z'), end
 
 function renderWeekly(id, metric){
   const el=document.getElementById(id);
-  if(timelineLoading){ el.innerHTML='<div class="tr-empty">Loading weekly history from Lemlist… (a few seconds)</div>'; return; }
+  if(timelineLoading){ el.innerHTML='<div class="tr-empty">Building weekly history from Lemlist… first load can take up to ~90s (then it\'s cached and instant).</div>'; return; }
   if(!timelineData){ el.innerHTML='<div class="tr-empty">Weekly history loads when you open this tab.</div>'; return; }
   if(timelineData==='UNSUPPORTED'){ el.innerHTML='<div class="tr-empty">Weekly trends need the updated proxy — redeploy to enable.</div>'; return; }
   if(timelineData==='ERROR'){ el.innerHTML='<div class="tr-empty">Couldn\'t load weekly history — try Refresh.</div>'; return; }
