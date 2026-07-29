@@ -150,6 +150,11 @@
     .sp-track { flex: 1; height: 6px; background: #EEF3F6; border-radius: 3px; overflow: hidden; }
     .sp-fill { height: 100%; border-radius: 3px; transition: width .3s; }
     .sp-val { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .82rem; min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+    .sl-summary { background: #F8FAFB; border: 1px solid #EEF3F6; border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; }
+    .sl-summary-title { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #8494A0; margin-bottom: 8px; }
+    .sl-row { display: flex; gap: 12px; padding: 3px 0; font-size: .76rem; }
+    .sl-icp { font-family: 'Space Grotesk', sans-serif; font-weight: 700; min-width: 64px; flex-shrink: 0; }
+    .sl-parts { color: #5B6B78; }
     .st-empty { text-align: center; color: #B7C2CB; padding: 22px; font-size: .8rem; }
     .st-subhead { font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #8494A0; margin: 8px 0 2px; }
     .st-icp { display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px; cursor: pointer; border-bottom: 1px solid #EEF3F6; transition: background .12s; }
@@ -1213,6 +1218,17 @@ function drawCountScatter(el, pts, note){
 const STEP_ROLES=['The Hook','The Value Add','Social Proof','The Break-Up'];
 let stepPerfIcp='__all__';
 function setStepPerfIcp(icp){ stepPerfIcp=icp; renderStepPerf(); }
+/* how many campaigns per ICP have 3-step vs 4-step (etc.) sequences */
+function stepCountSummary(){
+  const by={};
+  stepData.forEach(c=>{ const n=(c.steps||[]).length; if(!n) return; const g=by[c.icp]||(by[c.icp]={total:0,dist:{}}); g.total++; g.dist[n]=(g.dist[n]||0)+1; });
+  const icps=ICPS.filter(i=>by[i]); if(!icps.length) return '';
+  return `<div class="sl-summary"><div class="sl-summary-title">Sequence length by ICP</div>`+
+    icps.map(icp=>{ const g=by[icp];
+      const parts=Object.keys(g.dist).map(Number).sort((a,b)=>b-a).map(n=>`<b>${g.dist[n]}×</b> ${n}-email`).join(' · ');
+      return `<div class="sl-row"><span class="sl-icp" style="color:${ICOL[icp]}">${icp}</span><span class="sl-parts">${g.total} campaign${g.total>1?'s':''} · ${parts}</span></div>`;
+    }).join('')+`</div>`;
+}
 function renderStepPerf(){
   const el=document.getElementById('stepPerf'); if(!el) return;
   if(typeof stepsLoading!=='undefined' && stepsLoading){ el.innerHTML='<div class="tr-empty">Loading step data from Lemlist…</div>'; return; }
@@ -1226,7 +1242,7 @@ function renderStepPerf(){
   const agg={};
   sel.forEach(c=>(c.steps||[]).forEach(s=>{ const a=agg[s.step]||(agg[s.step]={sent:0,opened:0,replied:0}); a.sent+=s.sent||0; a.opened+=s.opened||0; a.replied+=s.replied||0; }));
   const steps=Object.keys(agg).map(Number).sort((a,b)=>a-b);
-  if(!steps.length || !steps.some(k=>agg[k].sent>0)){ el.innerHTML=`<div class="tr-gran" style="margin-bottom:12px;">${nav}</div><div class="tr-empty">No sends yet for this selection — TBD</div>`; return; }
+  if(!steps.length || !steps.some(k=>agg[k].sent>0)){ el.innerHTML=stepCountSummary()+`<div class="tr-gran" style="margin-bottom:12px;">${nav}</div><div class="tr-empty">No sends yet for this selection — TBD</div>`; return; }
   const maxO=Math.max(...steps.map(k=>pct(agg[k].opened,agg[k].sent)),1), maxR=Math.max(...steps.map(k=>pct(agg[k].replied,agg[k].sent)),1);
   const rows=steps.map(k=>{ const a=agg[k], orr=pct(a.opened,a.sent), rrr=pct(a.replied,a.sent), live=a.sent>0;
     const bar=(v,mx,t)=>{ const col=live?rateCol(v,t):'#B7C2CB'; return `<div class="sp-metric"><div class="sp-track"><div class="sp-fill" style="width:${live?Math.min(100,v/mx*100):0}%;background:${col};"></div></div><span class="sp-val" style="color:${col}">${live?v.toFixed(t==='reply'?1:0)+'%':'TBD'}</span></div>`; };
@@ -1235,7 +1251,7 @@ function renderStepPerf(){
       <div class="sp-metrics"><div class="sp-col"><div class="sp-lbl">Open rate</div>${bar(orr,maxO,'open')}</div><div class="sp-col"><div class="sp-lbl">Reply rate</div>${bar(rrr,maxR,'reply')}</div></div>
     </div>`;
   }).join('');
-  el.innerHTML=`<div class="tr-gran" style="margin-bottom:14px;">${nav}</div>${rows}`;
+  el.innerHTML=stepCountSummary()+`<div class="tr-gran" style="margin-bottom:14px;">${nav}</div>${rows}`;
 }
 
 function render(){
