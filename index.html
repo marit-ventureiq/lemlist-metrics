@@ -131,6 +131,11 @@
     .st-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .82rem; min-width: 120px; }
     .st-dates { font-size: .74rem; color: #3A4A56; flex: 1; min-width: 220px; line-height: 1.5; }
     .st-badge { font-size: .66rem; font-weight: 700; padding: 5px 12px; border-radius: 20px; white-space: nowrap; }
+    .st-perf { font-size: .7rem; min-width: 128px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .tr-gran { display: inline-flex; gap: 2px; background: #EEF2F5; border: 1px solid #E1E8EE; border-radius: 9px; padding: 3px; }
+    .tr-gran-btn { font-size: .72rem; font-weight: 600; padding: 5px 12px; border: none; background: transparent; color: #5B6B78; border-radius: 6px; cursor: pointer; font-family: inherit; transition: all .12s; }
+    .tr-gran-btn:hover { color: #0C2233; }
+    .tr-gran-btn.active { background: #fff; color: #1C86C2; box-shadow: 0 1px 2px rgba(12,34,51,.1); }
     .st-empty { text-align: center; color: #B7C2CB; padding: 22px; font-size: .8rem; }
     .st-subhead { font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #8494A0; margin: 8px 0 2px; }
     .st-icp { display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px; cursor: pointer; border-bottom: 1px solid #EEF3F6; transition: background .12s; }
@@ -366,6 +371,14 @@
       </div>
     </div>
     <div class="cp-sub" id="trSub">Backlog volume and open/reply trends per ICP across launched sequences · live from Lemlist</div>
+    <div style="padding:0 26px 18px;display:flex;align-items:center;gap:9px;">
+      <span style="font-size:.66rem;color:#8494A0;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">Rate by</span>
+      <div class="tr-gran">
+        <button class="tr-gran-btn active" data-g="week" onclick="setTrGranularity('week')">Week</button>
+        <button class="tr-gran-btn" data-g="month" onclick="setTrGranularity('month')">Month</button>
+        <button class="tr-gran-btn" data-g="sequence" onclick="setTrGranularity('sequence')">By sequence</button>
+      </div>
+    </div>
   </div>
 
   <div class="cp-card">
@@ -878,17 +891,20 @@ const fmtDate = d => d.toLocaleDateString('en-GB',{day:'numeric',month:'short',y
 const seqOpen = new Set();   // which ICP groups are expanded
 function seqToggleIcp(icp){ seqOpen.has(icp)?seqOpen.delete(icp):seqOpen.add(icp); renderSequenceStatus(); }
 
-/* one campaign → its relaunch timing info */
+/* one campaign → its relaunch timing info + its performance (to judge before relaunching) */
 function seqCampInfo(c, now){
   const icp=parseCamp(c.name).icp;
-  if(!(c.reached>0)) return {name:c.name,icp,started:false,relaunchIn:Infinity,badge:'Not started',col:'#8494A0',bg:'#F0F3F5',dates:'No emails sent yet — sequence hasn’t run.'};
-  if(!c.lastSentAt)  return {name:c.name,icp,started:false,relaunchIn:Infinity,badge:'—',col:'#8494A0',bg:'#F0F3F5',dates:'Emails sent, but last-send date needs the updated proxy (redeploy to enable).'};
+  const perf = c.reached>0
+    ? `<span style="color:${rateCol(pct(c.opened,c.reached),'open')}">${pct(c.opened,c.reached).toFixed(0)}% open</span> · <span style="color:${rateCol(pct(c.replied,c.reached),'reply')}">${pct(c.replied,c.reached).toFixed(1)}% reply</span>`
+    : '<span style="color:#B7C2CB">— open · — reply</span>';
+  if(!(c.reached>0)) return {name:c.name,icp,started:false,relaunchIn:Infinity,perf,badge:'Not started',col:'#8494A0',bg:'#F0F3F5',dates:'No emails sent yet — sequence hasn’t run.'};
+  if(!c.lastSentAt)  return {name:c.name,icp,started:false,relaunchIn:Infinity,perf,badge:'—',col:'#8494A0',bg:'#F0F3F5',dates:'Emails sent, but last-send date needs the updated proxy (redeploy to enable).'};
   const last=new Date(c.lastSentAt);
   const daysSince=Math.floor((now-last)/864e5);
   const relaunchIn=RELAUNCH_AFTER_DAYS-daysSince;
   const eligible=new Date(last.getTime()+RELAUNCH_AFTER_DAYS*864e5);
   const ready=relaunchIn<=0;
-  return {name:c.name,icp,started:true,ready,relaunchIn,eligible,
+  return {name:c.name,icp,started:true,ready,relaunchIn,eligible,perf,
     badge: ready?'⏰ Ready to relaunch':`Relaunch in ${relaunchIn}d`,
     col: ready?RED:AMBER, bg: ready?'rgba(208,72,59,.12)':'rgba(224,164,0,.14)',
     dates:`Last email sent <b>${fmtDate(last)}</b> · ${daysSince===0?'today':daysSince+' day'+(daysSince===1?'':'s')+' ago'}`
@@ -898,6 +914,7 @@ function seqRowHtml(r){
   return `<div class="st-row">
     <div class="st-name" style="color:${ICOL[r.icp]||'#0C2233'}">${r.name}</div>
     <div class="st-dates">${r.dates}</div>
+    <div class="st-perf">${r.perf||''}</div>
     <div class="st-badge" style="color:${r.col};background:${r.bg};">${r.badge}</div>
   </div>`;
 }
@@ -953,8 +970,8 @@ function renderTrends(){
     ? '<div class="cp-status-dot" style="background:#1F9D6B"></div>Live · Lemlist connected'
     : '<div class="cp-status-dot" style="background:#E0A400"></div>No launched campaigns';
   renderVolume();
-  renderWeekly('trOpen','open');
-  renderWeekly('trReply','reply');
+  renderRate('trOpen','open');
+  renderRate('trReply','reply');
 }
 
 /* Backlog volume per ICP — total leads in launched sequences + how many are relaunch-ready */
@@ -1029,38 +1046,81 @@ async function loadTimeline(force){
 
 function continuousWeeks(a,b){ const out=[]; let d=new Date(a+'T00:00:00Z'), end=new Date(b+'T00:00:00Z');
   while(d<=end && out.length<80){ out.push(d.toISOString().slice(0,10)); d.setUTCDate(d.getUTCDate()+7); } return out; }
+function continuousMonths(a,b){ const out=[]; let y=+a.slice(0,4), m=+a.slice(5,7), ey=+b.slice(0,4), em=+b.slice(5,7);
+  while((y<ey || (y===ey && m<=em)) && out.length<60){ out.push(y+'-'+(m<10?'0':'')+m); m++; if(m>12){ m=1; y++; } } return out; }
 
-function renderWeekly(id, metric){
-  const el=document.getElementById(id);
-  if(timelineLoading){ el.innerHTML='<div class="tr-empty">Building weekly history from Lemlist… first load can take up to ~90s (then it\'s cached and instant).</div>'; return; }
-  if(!timelineData){ el.innerHTML='<div class="tr-empty">Weekly history loads when you open this tab.</div>'; return; }
-  if(timelineData==='UNSUPPORTED'){ el.innerHTML='<div class="tr-empty">Weekly trends need the updated proxy — redeploy to enable.</div>'; return; }
-  if(timelineData==='ERROR'){ el.innerHTML='<div class="tr-empty">Couldn\'t load weekly history — try Refresh.</div>'; return; }
-  const by=timelineData, wset=new Set();
-  Object.values(by).forEach(wks=>Object.keys(wks).forEach(w=>wset.add(w)));
-  const sorted=[...wset].sort();
-  if(!sorted.length){ el.innerHTML='<div class="tr-empty">No sends recorded yet — TBD</div>'; return; }
-  const axis=continuousWeeks(sorted[0], sorted[sorted.length-1]);
-  const series=ICPS.filter(icp=>by[icp]).map(icp=>({ icp, col:ICOL[icp],
-    points: axis.map(w=>{ const s=by[icp][w]; if(!s||!s.sent) return {y:null};
+let trGranularity='week';
+function setTrGranularity(g){ trGranularity=g; document.querySelectorAll('.tr-gran-btn').forEach(b=>b.classList.toggle('active', b.dataset.g===g)); renderTrends(); }
+
+function trXLabel(key){
+  if(trGranularity==='month'){ const p=key.split('-'); return new Date(Date.UTC(+p[0],+p[1]-1,1)).toLocaleDateString('en-GB',{month:'short',year:'2-digit'}); }
+  return 'wk '+new Date(key+'T00:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+}
+
+/* roll the weekly timeline into week or month buckets → {axis, series} */
+function bucketTimeline(metric){
+  const by=timelineData, conv={};
+  Object.keys(by).forEach(icp=>{ const out={}; Object.keys(by[icp]).forEach(wk=>{
+    const key = trGranularity==='month' ? wk.slice(0,7) : wk;
+    const b=out[key]||(out[key]={sent:0,opened:0,replied:0}), s=by[icp][wk];
+    b.sent+=s.sent; b.opened+=s.opened; b.replied+=s.replied; }); conv[icp]=out; });
+  const keys=new Set(); Object.values(conv).forEach(o=>Object.keys(o).forEach(k=>keys.add(k)));
+  const sorted=[...keys].sort();
+  if(!sorted.length) return {axis:[], series:[]};
+  const rawAxis = trGranularity==='month' ? continuousMonths(sorted[0],sorted[sorted.length-1]) : continuousWeeks(sorted[0],sorted[sorted.length-1]);
+  const series=ICPS.filter(icp=>conv[icp]).map(icp=>({ icp, col:ICOL[icp],
+    points: rawAxis.map(k=>{ const s=conv[icp][k]; if(!s||!s.sent) return {y:null};
       const num=metric==='open'?s.opened:s.replied; return {y:Math.min(100,num/s.sent*100), sent:s.sent}; }) }))
     .filter(s=>s.points.some(p=>p.y!==null));
+  return { axis: rawAxis.map(k=>({key:k, label:trXLabel(k)})), series };
+}
+
+function renderRate(id, metric){
+  const el=document.getElementById(id);
+  if(trGranularity==='sequence') return renderSeqScatter(el, metric);
+  if(timelineLoading){ el.innerHTML='<div class="tr-empty">Building history from Lemlist… first load can take up to ~90s (then it\'s cached and instant).</div>'; return; }
+  if(!timelineData){ el.innerHTML='<div class="tr-empty">History loads when you open this tab.</div>'; return; }
+  if(timelineData==='UNSUPPORTED'){ el.innerHTML='<div class="tr-empty">Week/month trends need the updated proxy — redeploy to enable. (“By sequence” works without it.)</div>'; return; }
+  if(timelineData==='ERROR'){ el.innerHTML='<div class="tr-empty">Couldn\'t load history — try Refresh.</div>'; return; }
+  const {axis, series}=bucketTimeline(metric);
   if(!series.length){ el.innerHTML='<div class="tr-empty">No sends recorded yet — TBD</div>'; return; }
+  drawLineChart(el, axis, series, metric, 'gaps = '+(trGranularity==='month'?'months':'weeks')+' with no sends for that ICP (N/A)');
+}
+
+function drawLineChart(el, axis, series, metric, note){
   const W=640,H=210,padL=40,padR=14,padT=14,padB=34,n=axis.length;
   const X=i=> n<=1?padL+(W-padL-padR)/2 : padL+i/(n-1)*(W-padL-padR);
   const ymax=Math.max(...series.flatMap(s=>s.points.filter(p=>p.y!=null).map(p=>p.y)), metric==='open'?10:2)*1.12;
   const Y=v=>padT+(1-v/ymax)*(H-padT-padB);
   let grid=''; niceTicks(ymax).forEach(t=>{ const y=Y(t); grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#EEF3F6"/><text x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8494A0">${t}%</text>`; });
-  let xax=''; const ticks=n<=1?[0]:[0,Math.floor((n-1)/2),n-1]; ticks.forEach(i=>{ const d=new Date(axis[i]+'T00:00:00Z'); xax+=`<text x="${X(i).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="9" fill="#8494A0">wk ${d.toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</text>`; });
+  let xax=''; const ticks=n<=1?[0]:[0,Math.floor((n-1)/2),n-1]; ticks.forEach(i=>{ xax+=`<text x="${X(i).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="9" fill="#8494A0">${axis[i].label}</text>`; });
   let lines='';
   series.forEach(s=>{ let seg=[];
     const flush=()=>{ if(seg.length>1) lines+=`<polyline points="${seg.join(' ')}" fill="none" stroke="${s.col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`; seg=[]; };
     s.points.forEach((p,i)=>{ if(p.y==null){ flush(); return; } const x=X(i).toFixed(1), y=Y(p.y).toFixed(1); seg.push(x+','+y);
-      lines+=`<circle cx="${x}" cy="${y}" r="3.4" fill="${s.col}"><title>${s.icp} · week of ${axis[i]} · ${p.y.toFixed(1)}% · ${p.sent} sent</title></circle>`; });
+      lines+=`<circle cx="${x}" cy="${y}" r="3.4" fill="${s.col}"><title>${s.icp} · ${axis[i].label} · ${p.y.toFixed(1)}%${p.sent?' · '+p.sent+' sent':''}</title></circle>`; });
     flush();
   });
   const leg=series.map(s=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${s.col}"></span>${s.icp}</div>`).join('');
-  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">gaps = weeks with no sends for that ICP (N/A)</div>`;
+  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">${note}</div>`;
+}
+
+/* By sequence: one point per campaign (whole-sequence cumulative rate), from camps. */
+function renderSeqScatter(el, metric){
+  const pts=camps.filter(c=>c.reached>=10).map(c=>({icp:c.icp,date:new Date(c.lastSentAt||c.createdAt||Date.now()),y:metric==='open'?pct(c.opened,c.reached):pct(c.replied,c.reached),reached:c.reached,name:c.name})).filter(p=>!isNaN(+p.date));
+  if(!pts.length){ el.innerHTML='<div class="tr-empty">Not enough send volume yet — TBD</div>'; return; }
+  const groups={}; pts.forEach(p=>{(groups[p.icp]=groups[p.icp]||[]).push(p);}); Object.values(groups).forEach(g=>g.sort((a,b)=>a.date-b.date));
+  const W=640,H=210,padL=40,padR=14,padT=14,padB=34;
+  const xs=pts.map(p=>+p.date); let xmin=Math.min(...xs),xmax=Math.max(...xs); if(xmin===xmax){xmin-=864e5;xmax+=864e5;}
+  const ymax=Math.max(...pts.map(p=>p.y),metric==='open'?10:2)*1.12;
+  const X=d=>padL+(+d-xmin)/(xmax-xmin)*(W-padL-padR); const Y=v=>padT+(1-v/ymax)*(H-padT-padB);
+  let grid=''; niceTicks(ymax).forEach(t=>{ const y=Y(t); grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#EEF3F6"/><text x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8494A0">${t}%</text>`; });
+  let xax=''; [xmin,(xmin+xmax)/2,xmax].forEach(t=>{ xax+=`<text x="${X(t).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="9" fill="#8494A0">${new Date(t).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</text>`; });
+  let lines=''; Object.keys(groups).forEach(icp=>{ const g=groups[icp],col=ICOL[icp]||'#8494A0';
+    if(g.length>1) lines+=`<polyline points="${g.map(p=>`${X(p.date).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`;
+    g.forEach(p=>{ lines+=`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4" fill="${col}"><title>${p.name} · ${p.y.toFixed(1)}% · ${fmtK(p.reached)} sent</title></circle>`; }); });
+  const leg=Object.keys(groups).map(icp=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${ICOL[icp]||'#8494A0'}"></span>${icp} (${groups[icp].length})</div>`).join('');
+  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">each dot = one campaign (whole sequence), by last-send date · needs ≥10 sends</div>`;
 }
 
 function render(){
