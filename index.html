@@ -136,6 +136,20 @@
     .tr-gran-btn { font-size: .72rem; font-weight: 600; padding: 5px 12px; border: none; background: transparent; color: #5B6B78; border-radius: 6px; cursor: pointer; font-family: inherit; transition: all .12s; }
     .tr-gran-btn:hover { color: #0C2233; }
     .tr-gran-btn.active { background: #fff; color: #1C86C2; box-shadow: 0 1px 2px rgba(12,34,51,.1); }
+    /* Performance by step */
+    .sp-row { display: flex; align-items: center; gap: 18px; padding: 13px 0; border-bottom: 1px solid #EEF3F6; flex-wrap: wrap; }
+    .sp-row:last-child { border-bottom: none; }
+    .sp-step { display: flex; align-items: center; gap: 11px; min-width: 175px; flex-shrink: 0; }
+    .sp-badge { width: 28px; height: 28px; border-radius: 8px; background: #EEF3F6; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-weight: 700; color: #1C86C2; font-size: .78rem; flex-shrink: 0; }
+    .sp-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .8rem; color: #0C2233; }
+    .sp-sent { font-size: .64rem; color: #8494A0; margin-top: 1px; }
+    .sp-metrics { display: flex; gap: 22px; flex: 1; }
+    .sp-col { flex: 1; min-width: 130px; }
+    .sp-lbl { font-size: .62rem; color: #8494A0; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .sp-metric { display: flex; align-items: center; gap: 9px; }
+    .sp-track { flex: 1; height: 6px; background: #EEF3F6; border-radius: 3px; overflow: hidden; }
+    .sp-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+    .sp-val { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: .82rem; min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
     .st-empty { text-align: center; color: #B7C2CB; padding: 22px; font-size: .8rem; }
     .st-subhead { font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #8494A0; margin: 8px 0 2px; }
     .st-icp { display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px; cursor: pointer; border-bottom: 1px solid #EEF3F6; transition: background .12s; }
@@ -391,18 +405,34 @@
 
   <div class="cp-card">
     <div class="cp-section" style="padding-bottom:10px;">
-      <div class="cp-section-title">Open rate per ICP, by week</div>
-      <div class="cp-section-sub" style="margin-bottom:0;">opens ÷ emails sent that week (opens counted against their send-week) · a break in a line = no sends that week (N/A)</div>
+      <div class="cp-section-title">Emails sent per ICP</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">sending volume per ICP — follows the Week / Month / By-sequence toggle above</div>
+    </div>
+    <div class="cp-card-pad" style="padding-top:4px;" id="trVolTrend"></div>
+  </div>
+
+  <div class="cp-card">
+    <div class="cp-section" style="padding-bottom:10px;">
+      <div class="cp-section-title">Open rate per ICP</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">opens ÷ emails sent (opens counted against their send-week) · a break in a line = no sends that period (N/A)</div>
     </div>
     <div class="cp-card-pad" style="padding-top:4px;" id="trOpen"></div>
   </div>
 
   <div class="cp-card">
     <div class="cp-section" style="padding-bottom:10px;">
-      <div class="cp-section-title">Reply rate per ICP, by week</div>
-      <div class="cp-section-sub" style="margin-bottom:0;">replies ÷ emails sent that week (replies counted against their send-week) · a break in a line = no sends that week (N/A)</div>
+      <div class="cp-section-title">Reply rate per ICP</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">replies ÷ emails sent (replies counted against their send-week) · a break in a line = no sends that period (N/A)</div>
     </div>
     <div class="cp-card-pad" style="padding-top:4px;" id="trReply"></div>
+  </div>
+
+  <div class="cp-card">
+    <div class="cp-section" style="padding-bottom:10px;">
+      <div class="cp-section-title">Performance by sequence step</div>
+      <div class="cp-section-sub" style="margin-bottom:0;">which step drives opens &amp; replies — totals across all launched runs (whole-sequence, not weekly)</div>
+    </div>
+    <div class="cp-card-pad" style="padding-top:4px;" id="stepPerf"></div>
   </div>
 
   <div class="cp-card" id="seqTimingCard">
@@ -441,18 +471,22 @@ function switchTab(id, btn) {
   document.getElementById('tab-' + id).classList.add('active');
   btn.classList.add('active');
   if(id==='sequence') loadSeqLab();
-  if(id==='trends' && !timelineLoaded && !timelineLoading && camps.length) loadTimeline();
+  if(id==='trends'){
+    if(!timelineLoaded && !timelineLoading && camps.length) loadTimeline();
+    if(!stepsLoaded && !stepsLoading && camps.length) loadSteps();
+  }
 }
 
 
 /* ══════════════════════════════════════════════════
    SEQUENCE LAB — live per-step performance
    ══════════════════════════════════════════════════ */
-let stepData=null, seqSel=null, stepsLoaded=false;
+let stepData=null, seqSel=null, stepsLoaded=false, stepsLoading=false;
 
 async function loadSteps(force){
   const btn=document.querySelector('#tab-sequence .cp-refresh');
   if(btn) btn.style.opacity='.5';
+  stepsLoading=true; if(typeof renderStepPerf==='function') renderStepPerf();
   try{
     const res=await fetch(APPS_SCRIPT_URL+'?mode=steps');
     const raw=await res.json();
@@ -460,17 +494,12 @@ async function loadSteps(force){
     const LAUNCHED_STATUS=new Set(['running','paused','ended','completed','stopped','started']);
     stepData=raw.map(c=>{ const {icp,country}=parseCamp(c.name||''); return {icp,country,name:c.name,status:String(c.status||'').toLowerCase(),steps:c.steps||[]}; })
       .filter(c=>ICPS.includes(c.icp)&&COUNTRIES.includes(c.country)&&LAUNCHED_STATUS.has(c.status));
-    if(!stepData.some(c=>c.name===seqSel)) seqSel = stepData.length ? stepData[0].name : null;
-    document.getElementById('seqStatus').innerHTML = stepData.length
-      ? '<div class="cp-status-dot" style="background:#1F9D6B"></div>Live · Lemlist connected'
-      : '<div class="cp-status-dot" style="background:#E0A400"></div>No launched campaigns';
   }catch(e){
-    stepData=[]; seqSel=null;
-    document.getElementById('seqStatus').innerHTML='<div class="cp-status-dot" style="background:#D0483B"></div>Not connected';
+    stepData=[];
   }
-  stepsLoaded=true;
+  stepsLoaded=true; stepsLoading=false;
   if(btn) btn.style.opacity='1';
-  renderSeq();
+  if(typeof renderStepPerf==='function') renderStepPerf();
 }
 
 function renderSeqNav(){
@@ -970,8 +999,10 @@ function renderTrends(){
     ? '<div class="cp-status-dot" style="background:#1F9D6B"></div>Live · Lemlist connected'
     : '<div class="cp-status-dot" style="background:#E0A400"></div>No launched campaigns';
   renderVolume();
+  renderVolumeTrend('trVolTrend');
   renderRate('trOpen','open');
   renderRate('trReply','reply');
+  renderStepPerf();
 }
 
 /* Backlog volume per ICP — total leads in launched sequences + how many are relaunch-ready */
@@ -1008,9 +1039,11 @@ function renderVolume(){
   el.innerHTML=legend+bars;
 }
 
-function niceTicks(max){
-  const step = max<=1?0.25 : max<=2.5?0.5 : max<=5?1 : max<=10?2 : max<=30?5 : max<=60?10 : 20;
-  const t=[]; for(let v=0; v<=max+1e-9; v+=step) t.push(+v.toFixed(2)); return t;
+function niceTicks(max){   // ~4-5 nice ticks; works for percentages and raw counts
+  if(!(max>0)) return [0];
+  const rough=max/4, mag=Math.pow(10,Math.floor(Math.log10(rough))), norm=rough/mag;
+  const step=(norm<1.5?1:norm<3?2:norm<7?5:10)*mag;
+  const t=[]; for(let v=0; v<=max+step*1e-3; v+=step) t.push(+v.toFixed(4)); return t;
 }
 
 /* Line chart: open or reply rate per ICP, points = campaigns by last-send date */
@@ -1057,8 +1090,8 @@ function trXLabel(key){
   return 'wk '+new Date(key+'T00:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short'});
 }
 
-/* roll the weekly timeline into week or month buckets → {axis, series} */
-function bucketTimeline(metric){
+/* roll the weekly timeline into week/month buckets → {axis:[{key,label}], convByIcp} */
+function bucketRaw(){
   const by=timelineData, conv={};
   Object.keys(by).forEach(icp=>{ const out={}; Object.keys(by[icp]).forEach(wk=>{
     const key = trGranularity==='month' ? wk.slice(0,7) : wk;
@@ -1066,13 +1099,18 @@ function bucketTimeline(metric){
     b.sent+=s.sent; b.opened+=s.opened; b.replied+=s.replied; }); conv[icp]=out; });
   const keys=new Set(); Object.values(conv).forEach(o=>Object.keys(o).forEach(k=>keys.add(k)));
   const sorted=[...keys].sort();
-  if(!sorted.length) return {axis:[], series:[]};
-  const rawAxis = trGranularity==='month' ? continuousMonths(sorted[0],sorted[sorted.length-1]) : continuousWeeks(sorted[0],sorted[sorted.length-1]);
-  const series=ICPS.filter(icp=>conv[icp]).map(icp=>({ icp, col:ICOL[icp],
-    points: rawAxis.map(k=>{ const s=conv[icp][k]; if(!s||!s.sent) return {y:null};
+  if(!sorted.length) return {axis:[], convByIcp:conv};
+  const raw = trGranularity==='month' ? continuousMonths(sorted[0],sorted[sorted.length-1]) : continuousWeeks(sorted[0],sorted[sorted.length-1]);
+  return { axis: raw.map(k=>({key:k, label:trXLabel(k)})), convByIcp:conv };
+}
+function bucketTimeline(metric){
+  const {axis, convByIcp}=bucketRaw();
+  if(!axis.length) return {axis:[], series:[]};
+  const series=ICPS.filter(icp=>convByIcp[icp]).map(icp=>({ icp, col:ICOL[icp],
+    points: axis.map(a=>{ const s=convByIcp[icp][a.key]; if(!s||!s.sent) return {y:null};
       const num=metric==='open'?s.opened:s.replied; return {y:Math.min(100,num/s.sent*100), sent:s.sent}; }) }))
     .filter(s=>s.points.some(p=>p.y!==null));
-  return { axis: rawAxis.map(k=>({key:k, label:trXLabel(k)})), series };
+  return { axis, series };
 }
 
 function renderRate(id, metric){
@@ -1121,6 +1159,83 @@ function renderSeqScatter(el, metric){
     g.forEach(p=>{ lines+=`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4" fill="${col}"><title>${p.name} · ${p.y.toFixed(1)}% · ${fmtK(p.reached)} sent</title></circle>`; }); });
   const leg=Object.keys(groups).map(icp=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${ICOL[icp]||'#8494A0'}"></span>${icp} (${groups[icp].length})</div>`).join('');
   el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">each dot = one campaign (whole sequence), by last-send date · needs ≥10 sends</div>`;
+}
+
+/* ── Volume per ICP (emails sent) — follows the Week/Month/By-sequence toggle ── */
+function renderVolumeTrend(id){
+  const el=document.getElementById(id);
+  if(trGranularity==='sequence'){
+    const pts=camps.filter(c=>c.reached>0).map(c=>({icp:c.icp,col:ICOL[c.icp],date:new Date(c.lastSentAt||c.createdAt||Date.now()),y:c.reached,name:c.name})).filter(p=>!isNaN(+p.date));
+    if(!pts.length){ el.innerHTML='<div class="tr-empty">No sends yet — TBD</div>'; return; }
+    return drawCountScatter(el, pts, 'each dot = one campaign, by last-send date');
+  }
+  if(timelineLoading){ el.innerHTML='<div class="tr-empty">Building history…</div>'; return; }
+  if(!timelineData){ el.innerHTML='<div class="tr-empty">Loads when you open this tab.</div>'; return; }
+  if(timelineData==='UNSUPPORTED'){ el.innerHTML='<div class="tr-empty">Week/month view needs the updated proxy — or use “By sequence”.</div>'; return; }
+  if(timelineData==='ERROR'){ el.innerHTML='<div class="tr-empty">Couldn\'t load history — try Refresh.</div>'; return; }
+  const {axis, convByIcp}=bucketRaw();
+  if(!axis.length){ el.innerHTML='<div class="tr-empty">No sends recorded yet — TBD</div>'; return; }
+  const series=ICPS.filter(icp=>convByIcp[icp]).map(icp=>({icp,col:ICOL[icp],
+    points:axis.map(a=>({y:(convByIcp[icp][a.key]||{}).sent||0}))})).filter(s=>s.points.some(p=>p.y>0));
+  if(!series.length){ el.innerHTML='<div class="tr-empty">No sends recorded yet — TBD</div>'; return; }
+  drawCountLine(el, axis, series, 'emails sent per '+(trGranularity==='month'?'month':'week')+' per ICP');
+}
+function drawCountLine(el, axis, series, note){
+  const W=640,H=210,padL=48,padR=14,padT=14,padB=34,n=axis.length;
+  const X=i=> n<=1?padL+(W-padL-padR)/2:padL+i/(n-1)*(W-padL-padR);
+  const ymax=Math.max(...series.flatMap(s=>s.points.map(p=>p.y||0)),1)*1.12;
+  const Y=v=>padT+(1-v/ymax)*(H-padT-padB);
+  let grid=''; niceTicks(ymax).forEach(t=>{ const y=Y(t); grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#EEF3F6"/><text x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8494A0">${fmtK(t)}</text>`; });
+  let xax=''; const ticks=n<=1?[0]:[0,Math.floor((n-1)/2),n-1]; ticks.forEach(i=>{ xax+=`<text x="${X(i).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="9" fill="#8494A0">${axis[i].label}</text>`; });
+  let lines=''; series.forEach(s=>{
+    lines+=`<polyline points="${s.points.map((p,i)=>`${X(i).toFixed(1)},${Y(p.y||0).toFixed(1)}`).join(' ')}" fill="none" stroke="${s.col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`;
+    s.points.forEach((p,i)=>{ if(p.y>0) lines+=`<circle cx="${X(i).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.4" fill="${s.col}"><title>${s.icp} · ${axis[i].label} · ${fmtK(p.y)} sent</title></circle>`; });
+  });
+  const leg=series.map(s=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${s.col}"></span>${s.icp}</div>`).join('');
+  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">${note}</div>`;
+}
+function drawCountScatter(el, pts, note){
+  const groups={}; pts.forEach(p=>{(groups[p.icp]=groups[p.icp]||[]).push(p);}); Object.values(groups).forEach(g=>g.sort((a,b)=>a.date-b.date));
+  const W=640,H=210,padL=48,padR=14,padT=14,padB=34;
+  const xs=pts.map(p=>+p.date); let xmin=Math.min(...xs),xmax=Math.max(...xs); if(xmin===xmax){xmin-=864e5;xmax+=864e5;}
+  const ymax=Math.max(...pts.map(p=>p.y),1)*1.12;
+  const X=d=>padL+(+d-xmin)/(xmax-xmin)*(W-padL-padR); const Y=v=>padT+(1-v/ymax)*(H-padT-padB);
+  let grid=''; niceTicks(ymax).forEach(t=>{ const y=Y(t); grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#EEF3F6"/><text x="${padL-6}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8494A0">${fmtK(t)}</text>`; });
+  let xax=''; [xmin,(xmin+xmax)/2,xmax].forEach(t=>{ xax+=`<text x="${X(t).toFixed(1)}" y="${H-12}" text-anchor="middle" font-size="9" fill="#8494A0">${new Date(t).toLocaleDateString('en-GB',{day:'numeric',month:'short'})}</text>`; });
+  let lines=''; Object.keys(groups).forEach(icp=>{ const g=groups[icp],col=ICOL[icp]||'#8494A0';
+    if(g.length>1) lines+=`<polyline points="${g.map(p=>`${X(p.date).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>`;
+    g.forEach(p=>{ lines+=`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4" fill="${col}"><title>${p.name} · ${fmtK(p.y)} sent</title></circle>`; }); });
+  const leg=Object.keys(groups).map(icp=>`<div class="tr-leg-item"><span class="tr-leg-dot" style="background:${ICOL[icp]||'#8494A0'}"></span>${icp} (${groups[icp].length})</div>`).join('');
+  el.innerHTML=`<div class="tr-chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${grid}<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#E1E8EE"/><line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#E1E8EE"/>${xax}${lines}</svg></div><div class="tr-legend">${leg}</div><div style="font-size:.62rem;color:#B7C2CB;margin-top:4px;padding-left:4px;">${note}</div>`;
+}
+
+/* ── Performance by sequence step (cumulative) — which step drives opens/replies ── */
+const STEP_ROLES=['The Hook','The Value Add','Social Proof','The Break-Up'];
+let stepPerfIcp='__all__';
+function setStepPerfIcp(icp){ stepPerfIcp=icp; renderStepPerf(); }
+function renderStepPerf(){
+  const el=document.getElementById('stepPerf'); if(!el) return;
+  if(typeof stepsLoading!=='undefined' && stepsLoading){ el.innerHTML='<div class="tr-empty">Loading step data from Lemlist…</div>'; return; }
+  if(!stepData){ el.innerHTML='<div class="tr-empty">Loads when you open this tab.</div>'; return; }
+  if(!stepData.length){ el.innerHTML='<div class="tr-empty">No launched sequences yet — TBD</div>'; return; }
+  const icpsPresent=[...new Set(stepData.map(c=>c.icp))];
+  if(stepPerfIcp!=='__all__' && !icpsPresent.includes(stepPerfIcp)) stepPerfIcp='__all__';
+  const nav=[{id:'__all__',label:'All ICPs'}].concat(icpsPresent.map(i=>({id:i,label:i})))
+    .map(it=>`<button class="tr-gran-btn${stepPerfIcp===it.id?' active':''}" onclick="setStepPerfIcp('${it.id}')">${it.label}</button>`).join('');
+  const sel=stepData.filter(c=> stepPerfIcp==='__all__'||c.icp===stepPerfIcp);
+  const agg={};
+  sel.forEach(c=>(c.steps||[]).forEach(s=>{ const a=agg[s.step]||(agg[s.step]={sent:0,opened:0,replied:0}); a.sent+=s.sent||0; a.opened+=s.opened||0; a.replied+=s.replied||0; }));
+  const steps=Object.keys(agg).map(Number).sort((a,b)=>a-b);
+  if(!steps.length || !steps.some(k=>agg[k].sent>0)){ el.innerHTML=`<div class="tr-gran" style="margin-bottom:12px;">${nav}</div><div class="tr-empty">No sends yet for this selection — TBD</div>`; return; }
+  const maxO=Math.max(...steps.map(k=>pct(agg[k].opened,agg[k].sent)),1), maxR=Math.max(...steps.map(k=>pct(agg[k].replied,agg[k].sent)),1);
+  const rows=steps.map(k=>{ const a=agg[k], orr=pct(a.opened,a.sent), rrr=pct(a.replied,a.sent), live=a.sent>0;
+    const bar=(v,mx,t)=>{ const col=live?rateCol(v,t):'#B7C2CB'; return `<div class="sp-metric"><div class="sp-track"><div class="sp-fill" style="width:${live?Math.min(100,v/mx*100):0}%;background:${col};"></div></div><span class="sp-val" style="color:${col}">${live?v.toFixed(t==='reply'?1:0)+'%':'TBD'}</span></div>`; };
+    return `<div class="sp-row">
+      <div class="sp-step"><span class="sp-badge">${k+1}</span><div><div class="sp-name">${STEP_ROLES[k]||('Step '+(k+1))}</div><div class="sp-sent">${live?fmtK(a.sent)+' sent':'not sent'}</div></div></div>
+      <div class="sp-metrics"><div class="sp-col"><div class="sp-lbl">Open rate</div>${bar(orr,maxO,'open')}</div><div class="sp-col"><div class="sp-lbl">Reply rate</div>${bar(rrr,maxR,'reply')}</div></div>
+    </div>`;
+  }).join('');
+  el.innerHTML=`<div class="tr-gran" style="margin-bottom:14px;">${nav}</div>${rows}`;
 }
 
 function render(){
