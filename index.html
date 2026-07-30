@@ -493,8 +493,12 @@ async function loadSteps(force){
   if(btn) btn.style.opacity='.5';
   stepsLoading=true; if(typeof renderStepPerf==='function') renderStepPerf();
   try{
-    const res=await fetch(APPS_SCRIPT_URL+'?mode=steps');
-    const raw=await res.json();
+    let res=await fetch(APPS_SCRIPT_URL+'?mode=stepstats');
+    let raw=await res.json();
+    // Fall back to the older (heavier) endpoint if the proxy doesn't know 'stepstats' yet.
+    if(Array.isArray(raw) && raw.length && !raw.some(c=>Array.isArray(c.steps))){
+      res=await fetch(APPS_SCRIPT_URL+'?mode=steps'); raw=await res.json();
+    }
     if(!Array.isArray(raw)) throw new Error(raw && raw.error ? raw.error : 'Unexpected response from Lemlist proxy');
     const LAUNCHED_STATUS=new Set(['running','paused','ended','completed','stopped','started']);
     stepData=raw.map(c=>{ const {icp,country}=parseCamp(c.name||''); return {icp,country,name:c.name,status:String(c.status||'').toLowerCase(),steps:c.steps||[]}; })
